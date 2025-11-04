@@ -14,7 +14,7 @@
 ### ファイル構成
 
 ```
-es-opt/
+es/
 ├── src/app.py              # Pythonバックエンド（Flask API）
 ├── templates/index.html    # フロントエンド（UI）
 └── notebooks/
@@ -28,7 +28,7 @@ es-opt/
 直接リンクから起動ノートブックを開く：
 
 ```
-https://colab.research.google.com/github/YOUR_USERNAME/es-opt/blob/main/notebooks/run_on_colab.ipynb
+https://colab.research.google.com/github/ryosuke-fujii/es/blob/main/notebooks/run_on_colab.ipynb
 ```
 
 セルを順番に実行するだけ！
@@ -40,8 +40,8 @@ https://colab.research.google.com/github/YOUR_USERNAME/es-opt/blob/main/notebook
 #### ステップ1: リポジトリをクローン
 
 ```python
-!git clone https://github.com/YOUR_USERNAME/es-opt.git
-%cd es-opt
+!git clone https://github.com/ryosuke-fujii/es.git
+%cd es
 
 print("✅ リポジトリをクローンしました")
 !ls -la
@@ -267,7 +267,7 @@ Google Colab上で編集した内容をGitHubに反映：
 # GitHub Personal Access Tokenを使用してプッシュ
 # https://github.com/settings/tokens でトークンを生成
 TOKEN = "YOUR_GITHUB_TOKEN"
-!git remote set-url origin https://{TOKEN}@github.com/YOUR_USERNAME/es-opt.git
+!git remote set-url origin https://{TOKEN}@github.com/ryosuke-fujii/es.git
 !git push
 ```
 
@@ -353,7 +353,7 @@ import sys
 print("Python path:", sys.path)
 
 # srcディレクトリを追加
-sys.path.insert(0, '/content/es-opt/src')
+sys.path.insert(0, '/content/es/src')
 
 # 再度インポート
 from app import app, load_csv_data
@@ -418,5 +418,5 @@ plt.show()
 ## 🙏 サポート
 
 問題が発生した場合：
-1. [GitHub Issues](https://github.com/YOUR_USERNAME/es-opt/issues)
+1. [GitHub Issues](https://github.com/ryosuke-fujii/es/issues)
 2. [README.md](README.md) のトラブルシューティングセクション

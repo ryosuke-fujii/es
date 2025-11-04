@@ -13,7 +13,7 @@
 ## ディレクトリ構造
 
 ```
-es-opt/
+es/
 ├── notebooks/
 │   └── run_on_colab.ipynb      # Google Colab用起動ノートブック
 ├── src/
@@ -31,15 +31,15 @@ es-opt/
 ### 方法1: 直接リンクから開く（最も簡単）
 
 ```
-https://colab.research.google.com/github/YOUR_USERNAME/es-opt/blob/main/notebooks/run_on_colab.ipynb
+https://colab.research.google.com/github/ryosuke-fujii/es/blob/main/notebooks/run_on_colab.ipynb
 ```
 
 ### 方法2: 手動でセットアップ
 
 1. **リポジトリをクローン**
 ```python
-!git clone https://github.com/YOUR_USERNAME/es-opt.git
-%cd es-opt
+!git clone https://github.com/ryosuke-fujii/es.git
+%cd es
 ```
 
 2. **パッケージをインストール**
@@ -131,8 +131,8 @@ print(f"🌐 公開URL: {public_url}")
 
 ```bash
 # リポジトリをクローン
-git clone https://github.com/YOUR_USERNAME/es-opt.git
-cd es-opt
+git clone https://github.com/ryosuke-fujii/es.git
+cd es
 
 # 仮想環境を作成（推奨）
 python -m venv venv
@@ -256,4 +256,4 @@ MIT License
 ---
 
 **作成者**: Your Name
-**リポジトリ**: https://github.com/YOUR_USERNAME/es-opt
+**リポジトリ**: https://github.com/ryosuke-fujii/es
