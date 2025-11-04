@@ -13,7 +13,7 @@
             padding: 20px;
         }
         .container {
-            max-width: 900px;
+            max-width: 1000px;
             margin: 0 auto;
             background: white;
             border-radius: 20px;
@@ -40,6 +40,10 @@
             font-weight: 600;
             color: #333;
         }
+        .required {
+            color: #e74c3c;
+            margin-left: 4px;
+        }
         input[type="text"], select, textarea {
             width: 100%;
             padding: 12px;
@@ -54,7 +58,7 @@
         }
         textarea {
             resize: vertical;
-            min-height: 120px;
+            min-height: 100px;
             font-family: inherit;
         }
         .char-count {
@@ -62,6 +66,42 @@
             font-size: 12px;
             color: #999;
             margin-top: 5px;
+        }
+        .es-questions {
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+        .es-question-item {
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #ddd;
+        }
+        .es-question-item:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        .add-question-btn {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        .remove-question-btn {
+            background: #dc3545;
+            color: white;
+            border: none;
+            padding: 5px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 12px;
+            float: right;
         }
         button {
             width: 100%;
@@ -77,10 +117,6 @@
         }
         button:hover {
             transform: translateY(-2px);
-        }
-        button:disabled {
-            background: #ccc;
-            cursor: not-allowed;
         }
         .loading {
             display: none;
@@ -229,52 +265,118 @@
             background: #6c757d;
             margin-top: 20px;
         }
+        .es-sample-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #4caf50;
+        }
+        .es-sample-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        .es-sample-company {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+        }
+        .badge {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .badge-pass {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+        .badge-accepted {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .es-profile {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+        .es-qa-item {
+            margin-bottom: 15px;
+            padding: 15px;
+            background: #fafafa;
+            border-radius: 6px;
+        }
+        .es-question {
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        .es-answer {
+            color: #333;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🎯 ES合格診断ツール</h1>
-        <p class="subtitle">3.5万件のデータからあなたに最適な企業を分析</p>
+        <p class="subtitle">3.5万件のデータから精密分析</p>
 
         <div id="form-section">
             <form id="diagnosis-form">
                 <div class="form-group">
-                    <label>大学名 *</label>
-                    <input type="text" id="university" required placeholder="例: 早稲田大学">
+                    <label>大学名<span class="required">*</span></label>
+                    <input type="text" id="university" list="universities-list" required placeholder="大学名を入力">
+                    <datalist id="universities-list"></datalist>
                 </div>
 
                 <div class="form-group">
-                    <label>学部・専攻</label>
+                    <label>学部・学科</label>
                     <input type="text" id="major" placeholder="例: 理工学部 情報工学科">
                 </div>
 
                 <div class="form-group">
-                    <label>GPA（任意）</label>
-                    <input type="text" id="gpa" placeholder="例: 3.5">
+                    <label>卒業年度<span class="required">*</span></label>
+                    <select id="graduationYear" required>
+                        <option value="">選択してください</option>
+                        <option value="25">25卒</option>
+                        <option value="26">26卒</option>
+                        <option value="27">27卒</option>
+                        <option value="28">28卒</option>
+                    </select>
                 </div>
 
                 <div class="form-group">
-                    <label>ガクチカ（100文字以上） *</label>
-                    <textarea id="gakuchika" required placeholder="学生時代に力を入れたことを具体的に記入してください"></textarea>
-                    <div class="char-count"><span id="char-count">0</span>/100文字</div>
-                </div>
-
-                <div class="form-group">
-                    <label>志望業界 *</label>
+                    <label>志望業界<span class="required">*</span></label>
                     <select id="targetIndustry" required>
                         <option value="">選択してください</option>
-                        <option value="IT">IT・Web</option>
-                        <option value="コンサルティング">コンサルティング</option>
-                        <option value="金融">金融</option>
-                        <option value="メーカー">メーカー</option>
-                        <option value="商社">商社</option>
-                        <option value="サービス">サービス</option>
                     </select>
                 </div>
 
                 <div class="form-group">
                     <label>第一志望企業（任意）</label>
-                    <input type="text" id="targetCompany" placeholder="例: サイバーエージェント">
+                    <input type="text" id="targetCompany" list="companies-list" placeholder="企業名を入力">
+                    <datalist id="companies-list"></datalist>
+                </div>
+
+                <div class="form-group">
+                    <label>ES質問と回答<span class="required">*</span></label>
+                    <div class="es-questions" id="es-questions-container">
+                        <div class="es-question-item">
+                            <label>質問1</label>
+                            <select class="es-question-select" required>
+                                <option value="">選択してください</option>
+                            </select>
+                            <textarea class="es-answer" required placeholder="回答を入力してください（100文字以上推奨）"></textarea>
+                            <div class="char-count"><span class="answer-count">0</span>文字</div>
+                        </div>
+                    </div>
+                    <button type="button" class="add-question-btn" onclick="addQuestion()">+ 質問を追加</button>
                 </div>
 
                 <button type="submit" id="submit-btn">診断を開始する</button>
@@ -294,7 +396,12 @@
 
             <div class="result-card">
                 <h2>🏢 あなたが受かりやすい企業 TOP5</h2>
-                <div id="companies-list"></div>
+                <div id="companies-result"></div>
+            </div>
+
+            <div class="result-card">
+                <h2>📝 類似する合格ES</h2>
+                <div id="similar-es-list"></div>
             </div>
 
             <div class="result-card">
@@ -304,7 +411,7 @@
             </div>
 
             <div class="result-card">
-                <h2>✍️ ガクチカ分析</h2>
+                <h2>✍️ ES分析</h2>
                 <div class="analysis-section">
                     <div class="analysis-box">
                         <h4>良い点</h4>
@@ -322,58 +429,186 @@
     </div>
 
     <script>
-        // 文字数カウント
-        document.getElementById('gakuchika').addEventListener('input', function(e) {
-            document.getElementById('char-count').textContent = e.target.value.length;
+        let questionCount = 1;
+        let universities = [];
+        let industries = [];
+        let companies = [];
+        let commonQuestions = [];
+
+        function initializeSelects() {
+            console.log('📋 選択肢を初期化中...');
+
+            try {
+                const dataElement = document.getElementById('embedded-data');
+                if (!dataElement) {
+                    console.error('❌ embedded-data要素が見つかりません');
+                    return;
+                }
+
+                window.EMBEDDED_DATA = JSON.parse(dataElement.textContent);
+
+                universities = window.EMBEDDED_DATA.universities || [];
+                industries = window.EMBEDDED_DATA.industries || [];
+                companies = window.EMBEDDED_DATA.companies || [];
+                commonQuestions = window.EMBEDDED_DATA.commonQuestions || [];
+
+                console.log(`✅ データ取得完了: 大学${universities.length}校, 業界${industries.length}種類, 企業${companies.length}社`);
+
+                // 大学名のdatalist
+                const universitiesList = document.getElementById('universities-list');
+                universities.forEach(uni => {
+                    const option = document.createElement('option');
+                    option.value = uni;
+                    universitiesList.appendChild(option);
+                });
+
+                // 業界のselect
+                const industrySelect = document.getElementById('targetIndustry');
+                industries.forEach(ind => {
+                    const option = document.createElement('option');
+                    option.value = ind;
+                    option.textContent = ind;
+                    industrySelect.appendChild(option);
+                });
+
+                // 企業名のdatalist
+                const companiesList = document.getElementById('companies-list');
+                companies.forEach(comp => {
+                    const option = document.createElement('option');
+                    option.value = comp;
+                    companiesList.appendChild(option);
+                });
+
+                // ES質問のselect
+                updateQuestionSelects();
+
+                console.log('✅ 初期化完了');
+            } catch (e) {
+                console.error('❌ 初期化エラー:', e);
+            }
+        }
+
+        function updateQuestionSelects() {
+            document.querySelectorAll('.es-question-select').forEach(select => {
+                if (select.options.length <= 1) {
+                    commonQuestions.forEach(q => {
+                        const option = document.createElement('option');
+                        option.value = q;
+                        option.textContent = q;
+                        select.appendChild(option);
+                    });
+                }
+            });
+        }
+
+        function addQuestion() {
+            if (questionCount >= 3) {
+                alert('質問は最大3つまでです');
+                return;
+            }
+
+            questionCount++;
+            const container = document.getElementById('es-questions-container');
+            const newQuestion = document.createElement('div');
+            newQuestion.className = 'es-question-item';
+            newQuestion.innerHTML = `
+                <button type="button" class="remove-question-btn" onclick="removeQuestion(this)">削除</button>
+                <label>質問${questionCount}</label>
+                <select class="es-question-select" required>
+                    <option value="">選択してください</option>
+                </select>
+                <textarea class="es-answer" required placeholder="回答を入力してください"></textarea>
+                <div class="char-count"><span class="answer-count">0</span>文字</div>
+            `;
+            container.appendChild(newQuestion);
+            updateQuestionSelects();
+
+            newQuestion.querySelector('.es-answer').addEventListener('input', function(e) {
+                const countSpan = e.target.parentElement.querySelector('.answer-count');
+                countSpan.textContent = e.target.value.length;
+            });
+        }
+
+        function removeQuestion(btn) {
+            btn.parentElement.remove();
+            questionCount--;
+        }
+
+        document.addEventListener('input', function(e) {
+            if (e.target.classList.contains('es-answer')) {
+                const countSpan = e.target.parentElement.querySelector('.answer-count');
+                countSpan.textContent = e.target.value.length;
+            }
         });
 
-        // フォーム送信
         document.getElementById('diagnosis-form').addEventListener('submit', async function(e) {
             e.preventDefault();
+
+            const esQuestions = [];
+            const esAnswers = [];
+
+            document.querySelectorAll('.es-question-item').forEach(item => {
+                const question = item.querySelector('.es-question-select').value;
+                const answer = item.querySelector('.es-answer').value;
+                if (question && answer) {
+                    esQuestions.push(question);
+                    esAnswers.push(answer);
+                }
+            });
+
+            const hasLongAnswer = esAnswers.some(a => a.length >= 100);
+            if (!hasLongAnswer) {
+                alert('少なくとも1つの回答は100文字以上入力してください');
+                return;
+            }
 
             const formData = {
                 university: document.getElementById('university').value,
                 major: document.getElementById('major').value,
-                gpa: document.getElementById('gpa').value,
-                gakuchika: document.getElementById('gakuchika').value,
+                graduationYear: document.getElementById('graduationYear').value,
                 targetIndustry: document.getElementById('targetIndustry').value,
-                targetCompany: document.getElementById('targetCompany').value
+                targetCompany: document.getElementById('targetCompany').value,
+                esQuestions: esQuestions,
+                esAnswers: esAnswers
             };
 
-            if (formData.gakuchika.length < 100) {
-                alert('ガクチカは100文字以上入力してください');
-                return;
-            }
-
-            // ローディング表示
             document.getElementById('form-section').style.display = 'none';
             document.getElementById('loading').style.display = 'block';
 
             try {
                 const response = await fetch('/analyze', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(formData)
                 });
 
+                const result = await response.json();
+
                 if (!response.ok) {
-                    throw new Error('診断に失敗しました');
+                    throw new Error(result.error || '診断に失敗しました');
                 }
 
-                const result = await response.json();
                 displayResults(result);
-
             } catch (error) {
-                alert('エラーが発生しました: ' + error.message);
+                alert('エラー: ' + error.message);
                 document.getElementById('form-section').style.display = 'block';
                 document.getElementById('loading').style.display = 'none';
             }
         });
 
         function displayResults(data) {
-            // サマリー統計
+            console.log('📊 診断結果を表示中:', data);
+
+            if (!data.matchCompanies || data.matchCompanies.length === 0) {
+                console.error('❌ matchCompaniesが空です');
+                alert('マッチする企業が見つかりませんでした');
+                document.getElementById('form-section').style.display = 'block';
+                document.getElementById('loading').style.display = 'none';
+                return;
+            }
+
+            console.log(`✅ ${data.matchCompanies.length}社の企業データを受信`);
+
             const topCompany = data.matchCompanies[0];
             document.getElementById('summary-stats').innerHTML = `
                 <div class="stat-card">
@@ -390,7 +625,6 @@
                 </div>
             `;
 
-            // 企業リスト
             const companiesHtml = data.matchCompanies.map((company, index) => `
                 <div class="company-item">
                     <div class="company-header">
@@ -403,9 +637,38 @@
                     <div class="company-reason">${company.reason}</div>
                 </div>
             `).join('');
-            document.getElementById('companies-list').innerHTML = companiesHtml;
 
-            // 業界統計
+            document.getElementById('companies-result').innerHTML = companiesHtml;
+
+            if (data.similarESSamples && data.similarESSamples.length > 0) {
+                const similarESHtml = data.similarESSamples.map(sample => {
+                    const resultBadge = sample.result === '内定' ?
+                        '<span class="badge badge-accepted">内定</span>' :
+                        '<span class="badge badge-pass">通過</span>';
+
+                    const qaItemsHtml = sample.esContent.map(qa => `
+                        <div class="es-qa-item">
+                            <div class="es-question">Q. ${qa.question}</div>
+                            <div class="es-answer">${qa.answer}</div>
+                        </div>
+                    `).join('');
+
+                    return `
+                        <div class="es-sample-card">
+                            <div class="es-sample-header">
+                                <div class="es-sample-company">${sample.company}</div>
+                                ${resultBadge}
+                            </div>
+                            <div class="es-profile">
+                                🎓 ${sample.profile.university} | 📚 ${sample.profile.major} | 📅 ${sample.profile.gradYear}
+                            </div>
+                            ${qaItemsHtml}
+                        </div>
+                    `;
+                }).join('');
+                document.getElementById('similar-es-list').innerHTML = similarESHtml;
+            }
+
             document.getElementById('industry-stats').innerHTML = `
                 <div class="stat-card">
                     <div class="stat-value">${data.industryAnalysis.passRate}%</div>
@@ -421,36 +684,40 @@
                 </div>
             `;
 
-            // 推奨事項
-            const recommendationsHtml = data.industryAnalysis.recommendations.map(rec =>
-                `<li>${rec}</li>`
-            ).join('');
+            const recommendationsHtml = data.industryAnalysis.recommendations.map(rec => `<li>${rec}</li>`).join('');
             document.getElementById('recommendations').innerHTML = `
-                <h3>あなたの合格可能性を高める対策</h3>
+                <h3>合格可能性を高める対策</h3>
                 <ul>${recommendationsHtml}</ul>
             `;
 
-            // ガクチカ分析
-            const strengthsHtml = data.gakuchikaAnalysis.strengths.map(s =>
-                `<li class="strength">${s}</li>`
-            ).join('');
+            const strengthsHtml = data.esAnalysis.strengths.map(s => `<li class="strength">${s}</li>`).join('');
             document.getElementById('strengths-list').innerHTML = strengthsHtml;
 
-            const improvementsHtml = data.gakuchikaAnalysis.improvements.map(i =>
-                `<li class="improvement">${i}</li>`
-            ).join('');
+            const improvementsHtml = data.esAnalysis.improvements.map(i => `<li class="improvement">${i}</li>`).join('');
             document.getElementById('improvements-list').innerHTML = improvementsHtml;
 
-            // 結果を表示
             document.getElementById('loading').style.display = 'none';
             document.getElementById('results').style.display = 'block';
+            document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
         }
 
         function resetForm() {
             document.getElementById('diagnosis-form').reset();
-            document.getElementById('char-count').textContent = '0';
+            document.querySelectorAll('.answer-count').forEach(span => span.textContent = '0');
             document.getElementById('results').style.display = 'none';
             document.getElementById('form-section').style.display = 'block';
+
+            const container = document.getElementById('es-questions-container');
+            while (container.children.length > 1) {
+                container.removeChild(container.lastChild);
+            }
+            questionCount = 1;
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initializeSelects);
+        } else {
+            initializeSelects();
         }
     </script>
 </body>

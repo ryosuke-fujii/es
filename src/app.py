@@ -5,7 +5,8 @@ import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, Response
+import json
 import re
 import threading
 import time
@@ -15,6 +16,12 @@ import os
 es_data = None
 vectorizer = None
 tfidf_matrix = None
+
+# 選択肢用データ
+universities_list = []
+industries_list = []
+companies_list = []
+common_questions = []
 
 # Flaskアプリケーションの初期化
 # templatesフォルダを親ディレクトリから読み込む
@@ -42,6 +49,15 @@ def remove_prefix(text):
         return ""
     return re.sub(r'^[^：]+：\s*', '', str(text))
 
+def extract_university(user_info):
+    """ユーザー情報から大学名を抽出"""
+    if pd.isna(user_info):
+        return "不明"
+    match = re.search(r'\d{2}卒\s*\|\s*([^|]+)\s*\|', str(user_info))
+    if match:
+        return match.group(1).strip()
+    return "不明"
+
 def load_csv_data(csv_path):
     """CSVデータを読み込んで整形"""
     global es_data, vectorizer, tfidf_matrix
@@ -56,6 +72,7 @@ def load_csv_data(csv_path):
         'company_name': df['p-company-summary__name'].apply(clean_text),
         'industry': df['p-company-summary__stage-sub'].apply(remove_prefix),
         'title': df['p-company-heading-contents__title'].apply(clean_text),
+        'user_info': df.get('c-panel-variant2__header-user', pd.Series()).apply(clean_text),
         'question_1': df['u-font-light'].apply(clean_text),
         'answer_1': df['c-show-more__content'].apply(clean_text),
         'question_2': df.get('u-font-light (2)', pd.Series()).apply(clean_text),
@@ -65,6 +82,8 @@ def load_csv_data(csv_path):
         'avg_salary': df.get('p-company-table (11)', pd.Series()).apply(clean_text),
         'employee_count': df.get('p-company-summary__stage-sub (3)', pd.Series()).apply(remove_prefix),
     })
+
+    es_data['university'] = es_data['user_info'].apply(extract_university)
 
     es_data['result_status'] = es_data['title'].apply(
         lambda x: '内定' if '内定' in str(x) else ('通過' if '通過' in str(x) else '不明')
@@ -98,6 +117,38 @@ def load_csv_data(csv_path):
     print(f"  - 業界数: {es_data['industry'].nunique()}")
     print(f"  - 通過ES: {(es_data['result_status'] == '通過').sum()}件")
     print(f"  - 内定ES: {(es_data['result_status'] == '内定').sum()}件")
+
+    # 選択肢を抽出
+    global universities_list, industries_list, companies_list, common_questions
+
+    print("\n📋 選択肢を抽出中...")
+
+    universities_list = sorted(es_data['university'].dropna().unique().tolist())
+    universities_list = [u for u in universities_list if u != "不明" and str(u).strip() != ""]
+
+    industries_list = sorted(es_data['industry'].dropna().unique().tolist())
+    industries_list = [i for i in industries_list if i and str(i).strip() != ""]
+
+    companies_list = sorted(es_data['company_name'].dropna().unique().tolist())
+    companies_list = [c for c in companies_list if c and str(c).strip() != ""]
+
+    common_questions = [
+        "学生時代に力を入れたこと（ガクチカ）",
+        "志望動機",
+        "自己PR",
+        "あなたの強みとエピソード",
+        "挑戦したこと・チャレンジ",
+        "困難を乗り越えた経験",
+        "チームで成果を出した経験",
+        "リーダーシップを発揮した経験",
+        "インターンで学びたいこと",
+        "将来のキャリアビジョン"
+    ]
+
+    print(f"✅ 選択肢の抽出が完了しました")
+    print(f"  - 大学: {len(universities_list)}校")
+    print(f"  - 業界: {len(industries_list)}種類")
+    print(f"  - 企業: {len(companies_list)}社")
 
 def calculate_similarity(input_text, top_n=100):
     """類似度計算"""
@@ -138,16 +189,17 @@ def estimate_company_difficulty(row):
 
     return min(difficulty, 1.0)
 
-def calculate_match_score(similarity_score, company_difficulty, industry_match):
+def calculate_match_score(similarity_score, company_difficulty, industry_match, university_match=0.5):
     """マッチスコア計算"""
     score = (
-        similarity_score * 0.6 +
+        similarity_score * 0.5 +
         (1 - company_difficulty) * 0.2 +
-        industry_match * 0.2
+        industry_match * 0.2 +
+        university_match * 0.1
     )
     return min(int(score * 100), 100)
 
-def get_top_companies(similar_es, user_industry, top_n=5):
+def get_top_companies(similar_es, user_industry, user_university="", top_n=5):
     """TOP企業を選出"""
     companies = []
     seen_companies = set()
@@ -161,11 +213,13 @@ def get_top_companies(similar_es, user_industry, top_n=5):
 
         difficulty = estimate_company_difficulty(row)
         industry_match = 1.0 if user_industry in row['industry'] else 0.5
+        university_match = 1.0 if user_university and user_university == row.get('university') else 0.5
 
         match_score = calculate_match_score(
             row['similarity_score'],
             difficulty,
-            industry_match
+            industry_match,
+            university_match
         )
 
         reasons = []
@@ -173,6 +227,8 @@ def get_top_companies(similar_es, user_industry, top_n=5):
             reasons.append('ESの内容が類似')
         if industry_match == 1.0:
             reasons.append('志望業界と一致')
+        if university_match == 1.0:
+            reasons.append('同じ大学からの採用実績')
         if difficulty < 0.6:
             reasons.append('比較的通過しやすい')
 
@@ -272,6 +328,79 @@ def analyze_gakuchika(gakuchika_text):
         'improvements': improvements if improvements else ['現状で良い内容です']
     }
 
+def analyze_es_answers(answers):
+    """ES分析（複数回答対応）"""
+    all_text = ' '.join([a for a in answers if a])
+
+    strengths = []
+    improvements = []
+
+    if any(word in all_text for word in ['数値', '結果', '成果', '%', '人', '件', '倍']):
+        strengths.append('具体的な数値・成果の記載')
+    if any(word in all_text for word in ['課題', '問題', '解決', '改善', '克服']):
+        strengths.append('課題解決のプロセスが明確')
+    if any(word in all_text for word in ['チーム', '協力', '連携', 'メンバー', '組織']):
+        strengths.append('チームワークの要素がある')
+    if len(all_text) >= 500:
+        strengths.append('十分な分量で説明されている')
+
+    if not any(word in all_text for word in ['学んだ', '得た', '成長', '経験']):
+        improvements.append('学びや成長の要素を強調')
+    if not any(word in all_text for word in ['具体的', '例えば', '実際に']):
+        improvements.append('より具体的なエピソードを追加')
+    if len(all_text) < 300:
+        improvements.append('もう少し詳しく記述する')
+
+    return {
+        'strengths': strengths if strengths else ['基本的な構成は良好'],
+        'improvements': improvements if improvements else ['現状で良い内容です']
+    }
+
+def get_similar_es_samples(similar_es, top_n=3):
+    """類似ESのサンプルを取得"""
+    samples = []
+
+    for idx, row in similar_es.head(top_n).iterrows():
+        user_info = str(row.get('user_info', ''))
+
+        # 卒業年度を抽出
+        grad_year_match = re.search(r'(\d{2})卒', user_info)
+        grad_year = grad_year_match.group(1) + '卒' if grad_year_match else '不明'
+
+        university = row.get('university', '不明')
+
+        # 学部・学科を抽出
+        major_match = re.search(r'\|\s*([^|]+)\s*\|', user_info)
+        major = major_match.group(1).strip() if major_match else '不明'
+
+        es_content = []
+        for i in range(1, 4):
+            question = row.get(f'question_{i}', '')
+            answer = row.get(f'answer_{i}', '')
+
+            if question and answer and str(question).strip() and str(answer).strip():
+                es_content.append({
+                    'question': str(question).strip(),
+                    'answer': str(answer).strip()[:500] + ('...' if len(str(answer)) > 500 else '')
+                })
+
+        if len(es_content) > 0:
+            sample = {
+                'company': str(row['company_name']),
+                'industry': str(row['industry']) if not pd.isna(row['industry']) else '不明',
+                'result': str(row['result_status']),
+                'similarity': round(float(row['similarity_score']) * 100, 1),
+                'profile': {
+                    'university': university,
+                    'major': major,
+                    'gradYear': grad_year
+                },
+                'esContent': es_content
+            }
+            samples.append(sample)
+
+    return samples
+
 # ============================================
 # HTMLテンプレート（美しいUI）
 # ============================================
@@ -284,42 +413,88 @@ def analyze_gakuchika(gakuchika_text):
 
 @app.route('/')
 def home():
-    """フロントエンドUI"""
-    return render_template('index.html')
+    """フロントエンドUI - データを埋め込んだHTMLを返す"""
+    print("\n🌐 ページ生成中...")
+
+    # 選択肢データを準備
+    embedded_data = {
+        'universities': universities_list[:200],  # 最初の200校
+        'industries': industries_list,
+        'companies': companies_list[:300],  # 最初の300社
+        'commonQuestions': common_questions
+    }
+
+    # JSONシリアライズ（ensure_ascii=Trueで安全に）
+    embedded_data_json = json.dumps(embedded_data, ensure_ascii=True)
+
+    # HTMLテンプレートを読み込み
+    template_path = os.path.join(template_dir, 'index.html')
+    with open(template_path, 'r', encoding='utf-8') as f:
+        html_content = f.read()
+
+    # <script type="application/json">で埋め込み
+    embedded_script = f"""
+    <script id="embedded-data" type="application/json">
+{embedded_data_json}
+    </script>
+    """
+
+    # HTMLの</head>直前に挿入
+    html_content = html_content.replace('</head>', embedded_script + '\n</head>')
+
+    print(f"  ✅ データ埋め込み完了: 大学{len(embedded_data['universities'])}校, 業界{len(embedded_data['industries'])}種類")
+
+    return Response(html_content, mimetype='text/html')
 
 @app.route('/analyze', methods=['POST'])
 def analyze_es():
-    """ES診断API"""
+    """ES診断API - 複数ES質問対応"""
     try:
         data = request.get_json()
 
-        if not data.get('gakuchika') or len(data.get('gakuchika', '')) < 100:
-            return jsonify({'error': 'ガクチカは100文字以上入力してください'}), 400
+        # 複数のES回答に対応
+        if not data.get('esAnswers') or len(data.get('esAnswers', [])) == 0:
+            return jsonify({'error': 'ES回答を入力してください'}), 400
+
+        has_long_answer = any(len(ans) >= 100 for ans in data['esAnswers'])
+        if not has_long_answer:
+            return jsonify({'error': '少なくとも1つの回答は100文字以上入力してください'}), 400
 
         if not data.get('targetIndustry'):
             return jsonify({'error': '志望業界を選択してください'}), 400
 
-        similar_es = calculate_similarity(data['gakuchika'], top_n=100)
-        top_companies = get_top_companies(similar_es, data['targetIndustry'], top_n=5)
+        # 全ての回答を結合して類似度計算
+        combined_answers = ' '.join(data['esAnswers'])
+        similar_es = calculate_similarity(combined_answers, top_n=100)
+
+        top_companies = get_top_companies(
+            similar_es,
+            data['targetIndustry'],
+            data.get('university', ''),
+            top_n=5
+        )
+
         industry_analysis = analyze_industry(data['targetIndustry'])
-        gakuchika_analysis = analyze_gakuchika(data['gakuchika'])
+        es_analysis = analyze_es_answers(data['esAnswers'])
+        similar_es_samples = get_similar_es_samples(similar_es, top_n=3)
 
         response = {
             'matchCompanies': top_companies,
             'industryAnalysis': industry_analysis,
-            'gakuchikaAnalysis': gakuchika_analysis,
+            'esAnalysis': es_analysis,
+            'similarESSamples': similar_es_samples,
             'targetCompany': data.get('targetCompany'),
             'userInfo': {
                 'university': data.get('university'),
                 'major': data.get('major'),
-                'gpa': data.get('gpa')
+                'graduationYear': data.get('graduationYear')
             }
         }
 
         return jsonify(response)
 
     except Exception as e:
-        print(f"エラー: {e}")
+        print(f"❌ エラー発生: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
