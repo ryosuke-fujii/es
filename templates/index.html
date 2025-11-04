@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ES合格診断ツール</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+        }
+        h1 {
+            text-align: center;
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 32px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+        input[type="text"], select, textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        input[type="text"]:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        textarea {
+            resize: vertical;
+            min-height: 120px;
+            font-family: inherit;
+        }
+        .char-count {
+            text-align: right;
+            font-size: 12px;
+            color: #999;
+            margin-top: 5px;
+        }
+        button {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .results {
+            display: none;
+        }
+        .result-card {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .result-card h2 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 24px;
+        }
+        .company-item {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-left: 4px solid #667eea;
+        }
+        .company-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .company-name {
+            font-size: 20px;
+            font-weight: 600;
+            color: #333;
+        }
+        .match-score {
+            font-size: 28px;
+            font-weight: 700;
+            color: #667eea;
+        }
+        .company-industry {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+        .company-reason {
+            background: #e8eaf6;
+            padding: 10px;
+            border-radius: 6px;
+            color: #333;
+            font-size: 14px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #667eea;
+        }
+        .stat-label {
+            color: #666;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        .recommendations {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            border-radius: 8px;
+        }
+        .recommendations h3 {
+            color: #856404;
+            margin-bottom: 10px;
+        }
+        .recommendations ul {
+            list-style: none;
+            padding-left: 0;
+        }
+        .recommendations li {
+            padding: 5px 0;
+            color: #856404;
+        }
+        .recommendations li:before {
+            content: "✓ ";
+            font-weight: bold;
+        }
+        .analysis-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        .analysis-box {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+        }
+        .analysis-box h4 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        .analysis-box ul {
+            list-style: none;
+            padding-left: 0;
+        }
+        .analysis-box li {
+            padding: 5px 0;
+            font-size: 14px;
+        }
+        .strength:before {
+            content: "✓ ";
+            color: #4caf50;
+            font-weight: bold;
+        }
+        .improvement:before {
+            content: "⚠ ";
+            color: #ff9800;
+            font-weight: bold;
+        }
+        .reset-btn {
+            background: #6c757d;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎯 ES合格診断ツール</h1>
+        <p class="subtitle">3.5万件のデータからあなたに最適な企業を分析</p>
+
+        <div id="form-section">
+            <form id="diagnosis-form">
+                <div class="form-group">
+                    <label>大学名 *</label>
+                    <input type="text" id="university" required placeholder="例: 早稲田大学">
+                </div>
+
+                <div class="form-group">
+                    <label>学部・専攻</label>
+                    <input type="text" id="major" placeholder="例: 理工学部 情報工学科">
+                </div>
+
+                <div class="form-group">
+                    <label>GPA（任意）</label>
+                    <input type="text" id="gpa" placeholder="例: 3.5">
+                </div>
+
+                <div class="form-group">
+                    <label>ガクチカ（100文字以上） *</label>
+                    <textarea id="gakuchika" required placeholder="学生時代に力を入れたことを具体的に記入してください"></textarea>
+                    <div class="char-count"><span id="char-count">0</span>/100文字</div>
+                </div>
+
+                <div class="form-group">
+                    <label>志望業界 *</label>
+                    <select id="targetIndustry" required>
+                        <option value="">選択してください</option>
+                        <option value="IT">IT・Web</option>
+                        <option value="コンサルティング">コンサルティング</option>
+                        <option value="金融">金融</option>
+                        <option value="メーカー">メーカー</option>
+                        <option value="商社">商社</option>
+                        <option value="サービス">サービス</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>第一志望企業（任意）</label>
+                    <input type="text" id="targetCompany" placeholder="例: サイバーエージェント">
+                </div>
+
+                <button type="submit" id="submit-btn">診断を開始する</button>
+            </form>
+        </div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>診断中です。しばらくお待ちください...</p>
+        </div>
+
+        <div class="results" id="results">
+            <div class="result-card">
+                <h2>📊 診断結果サマリー</h2>
+                <div class="stats-grid" id="summary-stats"></div>
+            </div>
+
+            <div class="result-card">
+                <h2>🏢 あなたが受かりやすい企業 TOP5</h2>
+                <div id="companies-list"></div>
+            </div>
+
+            <div class="result-card">
+                <h2>📈 業界分析</h2>
+                <div class="stats-grid" id="industry-stats"></div>
+                <div class="recommendations" id="recommendations"></div>
+            </div>
+
+            <div class="result-card">
+                <h2>✍️ ガクチカ分析</h2>
+                <div class="analysis-section">
+                    <div class="analysis-box">
+                        <h4>良い点</h4>
+                        <ul id="strengths-list"></ul>
+                    </div>
+                    <div class="analysis-box">
+                        <h4>改善ポイント</h4>
+                        <ul id="improvements-list"></ul>
+                    </div>
+                </div>
+            </div>
+
+            <button class="reset-btn" onclick="resetForm()">もう一度診断する</button>
+        </div>
+    </div>
+
+    <script>
+        // 文字数カウント
+        document.getElementById('gakuchika').addEventListener('input', function(e) {
+            document.getElementById('char-count').textContent = e.target.value.length;
+        });
+
+        // フォーム送信
+        document.getElementById('diagnosis-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const formData = {
+                university: document.getElementById('university').value,
+                major: document.getElementById('major').value,
+                gpa: document.getElementById('gpa').value,
+                gakuchika: document.getElementById('gakuchika').value,
+                targetIndustry: document.getElementById('targetIndustry').value,
+                targetCompany: document.getElementById('targetCompany').value
+            };
+
+            if (formData.gakuchika.length < 100) {
+                alert('ガクチカは100文字以上入力してください');
+                return;
+            }
+
+            // ローディング表示
+            document.getElementById('form-section').style.display = 'none';
+            document.getElementById('loading').style.display = 'block';
+
+            try {
+                const response = await fetch('/analyze', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(formData)
+                });
+
+                if (!response.ok) {
+                    throw new Error('診断に失敗しました');
+                }
+
+                const result = await response.json();
+                displayResults(result);
+
+            } catch (error) {
+                alert('エラーが発生しました: ' + error.message);
+                document.getElementById('form-section').style.display = 'block';
+                document.getElementById('loading').style.display = 'none';
+            }
+        });
+
+        function displayResults(data) {
+            // サマリー統計
+            const topCompany = data.matchCompanies[0];
+            document.getElementById('summary-stats').innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-value">${topCompany.matchScore}%</div>
+                    <div class="stat-label">最高マッチ度</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${data.industryAnalysis.passRate}%</div>
+                    <div class="stat-label">業界合格率</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${data.matchCompanies.length}</div>
+                    <div class="stat-label">マッチ企業数</div>
+                </div>
+            `;
+
+            // 企業リスト
+            const companiesHtml = data.matchCompanies.map((company, index) => `
+                <div class="company-item">
+                    <div class="company-header">
+                        <div>
+                            <div class="company-name">#${index + 1} ${company.name}</div>
+                            <div class="company-industry">${company.industry}</div>
+                        </div>
+                        <div class="match-score">${company.matchScore}%</div>
+                    </div>
+                    <div class="company-reason">${company.reason}</div>
+                </div>
+            `).join('');
+            document.getElementById('companies-list').innerHTML = companiesHtml;
+
+            // 業界統計
+            document.getElementById('industry-stats').innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-value">${data.industryAnalysis.passRate}%</div>
+                    <div class="stat-label">合格率</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${data.industryAnalysis.avgApplicants}</div>
+                    <div class="stat-label">平均応募者数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${data.industryAnalysis.competition}</div>
+                    <div class="stat-label">競争率</div>
+                </div>
+            `;
+
+            // 推奨事項
+            const recommendationsHtml = data.industryAnalysis.recommendations.map(rec =>
+                `<li>${rec}</li>`
+            ).join('');
+            document.getElementById('recommendations').innerHTML = `
+                <h3>あなたの合格可能性を高める対策</h3>
+                <ul>${recommendationsHtml}</ul>
+            `;
+
+            // ガクチカ分析
+            const strengthsHtml = data.gakuchikaAnalysis.strengths.map(s =>
+                `<li class="strength">${s}</li>`
+            ).join('');
+            document.getElementById('strengths-list').innerHTML = strengthsHtml;
+
+            const improvementsHtml = data.gakuchikaAnalysis.improvements.map(i =>
+                `<li class="improvement">${i}</li>`
+            ).join('');
+            document.getElementById('improvements-list').innerHTML = improvementsHtml;
+
+            // 結果を表示
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('results').style.display = 'block';
+        }
+
+        function resetForm() {
+            document.getElementById('diagnosis-form').reset();
+            document.getElementById('char-count').textContent = '0';
+            document.getElementById('results').style.display = 'none';
+            document.getElementById('form-section').style.display = 'block';
+        }
+    </script>
+</body>
+</html>
