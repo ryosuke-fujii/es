@@ -323,12 +323,3 @@ def analyze_es():
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-
-# ============================================
-# データ読み込み
-# ============================================
-print("\n" + "="*50)
-print("📊 ES診断ツールを起動中...")
-print("="*50)
-
-load_csv_data(csv_filename)
