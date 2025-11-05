@@ -1171,6 +1171,72 @@ def get_similar_es_samples(similar_es, top_n=3):
 
     return samples
 
+def get_similar_es_samples_from_top_companies(similar_es, top_companies):
+    """
+    TOP企業リストに基づいて類似ESのサンプルを取得（順序を維持）
+
+    Args:
+        similar_es: 類似度計算済みのES DataFrame
+        top_companies: get_top_companies()から返された企業リスト
+
+    Returns:
+        list: TOP企業と同じ順序・同じ企業のESサンプル
+    """
+    samples = []
+
+    for company_info in top_companies:
+        company_name = company_info['name']
+
+        # この企業のESを類似度順で取得
+        company_es = similar_es[similar_es['company_name'] == company_name]
+
+        if len(company_es) == 0:
+            continue
+
+        # 最も類似度が高いESを1つ取得
+        row = company_es.iloc[0]
+
+        user_info = str(row.get('user_info', ''))
+
+        # 卒業年度を抽出
+        grad_year_match = re.search(r'(\d{2})卒', user_info)
+        grad_year = grad_year_match.group(1) + '卒' if grad_year_match else '不明'
+
+        university = row.get('university', '不明')
+
+        # 学部・学科を抽出
+        major_match = re.search(r'\|\s*([^|]+)\s*\|', user_info)
+        major = major_match.group(1).strip() if major_match else '不明'
+
+        es_content = []
+        for i in range(1, 4):
+            question = row.get(f'question_{i}', '')
+            answer = row.get(f'answer_{i}', '')
+
+            if question and answer and str(question).strip() and str(answer).strip():
+                es_content.append({
+                    'question': str(question).strip(),
+                    'answer': str(answer).strip()[:500] + ('...' if len(str(answer)) > 500 else '')
+                })
+
+        if len(es_content) > 0:
+            sample = {
+                'company': str(row['company_name']),
+                'industry': str(row['industry']) if not pd.isna(row['industry']) else '不明',
+                'result': str(row['result_status']),
+                'similarity': round(float(row['similarity_score']) * 100, 1),
+                'matchScore': company_info['matchScore'],  # TOP企業のマッチスコアを追加
+                'profile': {
+                    'university': university,
+                    'major': major,
+                    'gradYear': grad_year
+                },
+                'esContent': es_content
+            }
+            samples.append(sample)
+
+    return samples
+
 def get_episode_type_similar_es_samples(similar_es, input_text, top_n=3):
     """
     同じエピソードタイプの類似ESのサンプルを取得
@@ -1370,7 +1436,8 @@ def analyze_es():
 
         industry_analysis = analyze_industry(data['targetIndustry'])
         es_analysis = analyze_es_answers(data['esAnswers'])
-        similar_es_samples = get_similar_es_samples(similar_es, top_n=3)
+        # TOP企業と完全連動した類似ESサンプル（順序も同じ、5つ）
+        similar_es_samples = get_similar_es_samples_from_top_companies(similar_es, top_companies)
         industry_similar_es_samples = get_industry_similar_es_samples(similar_es, data['targetIndustry'], top_n=3)
 
         # 入力ESのエピソードタイプを判定
