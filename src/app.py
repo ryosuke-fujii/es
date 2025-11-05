@@ -94,6 +94,133 @@ ES_THEME_CATEGORIES = {
     ]
 }
 
+# エピソードタイプ分類（拡張版）
+EPISODE_TYPES = {
+    # ビジネス・実務経験
+    'アルバイト・接客': {
+        'keywords': [
+            'アルバイト', 'バイト', 'バイト先', 'アルバイト先',
+            '接客', '販売', '店舗', 'レストラン', 'カフェ', '飲食店',
+            'コンビニ', 'スーパー', '小売', 'ホール', 'レジ'
+        ],
+        'weight': 1.0
+    },
+    'インターン・実務': {
+        'keywords': [
+            'インターン', 'インターンシップ', '長期インターン',
+            '実務', '実務経験', '職務経験', 'ビジネス経験',
+            'インターン先', 'インターン生'
+        ],
+        'weight': 1.0
+    },
+    '起業・事業立ち上げ': {
+        'keywords': [
+            '起業', '創業', '事業', 'ビジネス',
+            '会社設立', '法人', '代表', '経営',
+            'スタートアップ', 'ベンチャー', '自営',
+            'サービス立ち上げ', '事業化', '商品開発'
+        ],
+        'weight': 1.0
+    },
+
+    # 学術・研究活動
+    '研究・ゼミ活動': {
+        'keywords': [
+            '研究', 'ゼミ', 'ゼミナール', '実験',
+            '論文', '学会', '卒論', '修論',
+            '研究室', 'ラボ', '調査', '分析',
+            '考察', '仮説', 'データ', '検証'
+        ],
+        'weight': 1.0
+    },
+    '資格取得・受験': {
+        'keywords': [
+            '資格', '検定', '試験', '合格',
+            '勉強', '受験', '学習', 'TOEIC',
+            'TOEFL', '簿記', '宅建', '公認会計士',
+            'FP', 'ソムリエ', '国家試験'
+        ],
+        'weight': 0.8
+    },
+
+    # 課外活動
+    '部活動・体育会': {
+        'keywords': [
+            '部活', '部活動', '体育会', '運動部',
+            '練習', 'トレーニング', '大会', '試合',
+            '選手', 'キャプテン', '主将', 'レギュラー',
+            '全国大会', '地区大会', '県大会'
+        ],
+        'weight': 1.0
+    },
+    'サークル活動': {
+        'keywords': [
+            'サークル', 'サークル活動', '同好会',
+            '文化系', '趣味', '愛好会',
+            'サークル代表', 'サークル長'
+        ],
+        'weight': 1.0
+    },
+    '学生団体・NPO': {
+        'keywords': [
+            '学生団体', '団体', 'NPO', 'NGO',
+            'ボランティア', '社会貢献', '支援活動',
+            '地域活動', 'コミュニティ', '市民活動',
+            '学生組織', '代表', '運営'
+        ],
+        'weight': 1.0
+    },
+
+    # 国際・語学経験
+    '留学・海外経験': {
+        'keywords': [
+            '留学', '海外', '海外経験', '海外留学',
+            '交換留学', '語学留学', '短期留学', '長期留学',
+            '海外インターン', 'ホームステイ', '海外ボランティア',
+            '現地', '異文化', '外国', '渡航'
+        ],
+        'weight': 1.0
+    },
+
+    # イベント・コンテスト
+    'コンテスト・大会': {
+        'keywords': [
+            'コンテスト', 'コンペ', 'コンペティション',
+            '大会', '競技会', 'ハッカソン',
+            'ビジネスコンテスト', 'プレゼン大会',
+            '入賞', '優勝', '受賞', '表彰'
+        ],
+        'weight': 1.0
+    },
+
+    # 個人プロジェクト
+    '個人プロジェクト・趣味': {
+        'keywords': [
+            '個人', '趣味', 'プロジェクト', '制作',
+            'ポートフォリオ', 'アプリ開発', 'Web制作',
+            'ブログ', 'SNS', 'YouTube', '動画',
+            '作品', 'ハンドメイド', 'DIY'
+        ],
+        'weight': 0.8
+    },
+
+    # 教育関連
+    '家庭教師・塾講師': {
+        'keywords': [
+            '家庭教師', '塾', '塾講師', '講師',
+            '指導', '教育', '生徒', '教える',
+            '授業', '添削', '進路指導'
+        ],
+        'weight': 1.0
+    },
+
+    # その他
+    'その他の経験': {
+        'keywords': [],
+        'weight': 0.5
+    }
+}
+
 # Flaskアプリケーションの初期化
 # templatesフォルダを親ディレクトリから読み込む
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -227,6 +354,108 @@ def analyze_es_structure(text):
 
     return structure_features
 
+def classify_episode_type(text):
+    """
+    ESテキストからエピソードタイプを判定
+
+    Args:
+        text (str): ES本文
+
+    Returns:
+        dict: {
+            'type': エピソードタイプ名,
+            'confidence': 信頼度（マッチしたキーワード数）,
+            'matched_keywords': マッチしたキーワードリスト
+        }
+    """
+    if pd.isna(text) or not text:
+        return {
+            'type': 'その他の経験',
+            'confidence': 0,
+            'matched_keywords': []
+        }
+
+    text_str = str(text)
+
+    # 各エピソードタイプでマッチング
+    episode_scores = []
+
+    for episode_type, config in EPISODE_TYPES.items():
+        keywords = config['keywords']
+        weight = config['weight']
+
+        # マッチしたキーワードをカウント
+        matched_keywords = [kw for kw in keywords if kw in text_str]
+        match_count = len(matched_keywords)
+
+        if match_count > 0:
+            # スコア = マッチ数 × 重み
+            score = match_count * weight
+            episode_scores.append({
+                'type': episode_type,
+                'score': score,
+                'confidence': match_count,
+                'matched_keywords': matched_keywords[:5]  # 最大5個まで
+            })
+
+    # スコアが最も高いものを返す
+    if episode_scores:
+        best_match = max(episode_scores, key=lambda x: x['score'])
+        return {
+            'type': best_match['type'],
+            'confidence': best_match['confidence'],
+            'matched_keywords': best_match['matched_keywords']
+        }
+
+    # マッチしない場合
+    return {
+        'type': 'その他の経験',
+        'confidence': 0,
+        'matched_keywords': []
+    }
+
+def classify_multiple_episode_types(text, top_n=2):
+    """
+    複数のエピソードタイプを返す（マルチラベル対応）
+
+    Args:
+        text (str): ES本文
+        top_n (int): 返すエピソードタイプの最大数
+
+    Returns:
+        list: エピソードタイプのリスト
+    """
+    if pd.isna(text) or not text:
+        return [{'type': 'その他の経験', 'confidence': 0}]
+
+    text_str = str(text)
+
+    episode_scores = []
+
+    for episode_type, config in EPISODE_TYPES.items():
+        keywords = config['keywords']
+        weight = config['weight']
+
+        matched_keywords = [kw for kw in keywords if kw in text_str]
+        match_count = len(matched_keywords)
+
+        if match_count > 0:
+            score = match_count * weight
+            episode_scores.append({
+                'type': episode_type,
+                'score': score,
+                'confidence': match_count
+            })
+
+    # スコア順にソート
+    episode_scores.sort(key=lambda x: x['score'], reverse=True)
+
+    # 上位top_nを返す
+    if episode_scores:
+        return episode_scores[:top_n]
+
+    return [{'type': 'その他の経験', 'confidence': 0}]
+
 def load_csv_data(csv_path):
     """CSVデータを読み込んで整形"""
     global es_data, vectorizer, tfidf_matrix, sentence_model
@@ -274,8 +503,25 @@ def load_csv_data(csv_path):
     print("🔧 ESのテーマ分析中...")
     es_data['themes'] = es_data['combined_answer'].apply(categorize_es_themes)
 
+    # エピソードタイプ分析を追加
+    print("🔧 エピソードタイプ分析中...")
+    es_data['episode_type'] = es_data['combined_answer'].apply(classify_episode_type)
+    es_data['episode_types_multi'] = es_data['combined_answer'].apply(
+        lambda x: classify_multiple_episode_types(x, top_n=2)
+    )
+
+    # エピソードタイプの統計を出力
+    episode_type_counts = {}
+    for episode_info in es_data['episode_type']:
+        episode_type = episode_info['type']
+        episode_type_counts[episode_type] = episode_type_counts.get(episode_type, 0) + 1
+
+    print("\n📊 エピソードタイプ別の分布:")
+    for episode_type, count in sorted(episode_type_counts.items(), key=lambda x: x[1], reverse=True)[:10]:
+        print(f"  - {episode_type}: {count}件")
+
     # 重要キーワードの重み付けテキストを生成
-    print("🔧 キーワード重み付け中...")
+    print("\n🔧 キーワード重み付け中...")
     es_data['weighted_answer'] = es_data['combined_answer'].apply(extract_theme_keywords_for_weighting)
 
     print("🔧 TF-IDFベクトル化中（最適化済みパラメータ）...")
@@ -509,6 +755,28 @@ def calculate_similarity(input_text, top_n=100):
         result['similarity_score'] * 0.8 +
         result['structure_score'] * 0.2
     )
+
+    # テーマフィルタリング強化
+    # 入力ESのテーマを抽出
+    input_themes = categorize_es_themes(input_text)
+    input_theme_names = set([t['theme'] for t in input_themes[:3]])  # 上位3テーマ
+
+    # テーマボーナスを追加
+    for idx, row in result.iterrows():
+        es_themes = row['themes']
+        es_theme_names = set([t['theme'] for t in es_themes[:3]])
+
+        # テーマの一致数を計算
+        theme_overlap = len(input_theme_names & es_theme_names)
+
+        # ボーナススコア（0〜0.15）
+        # 3つ一致 → +15%、2つ一致 → +10%、1つ一致 → +5%
+        theme_bonus = theme_overlap * 0.05
+
+        # スコアを更新（乗算）
+        result.at[idx, 'similarity_score'] = (
+            row['similarity_score'] * (1 + theme_bonus)
+        )
 
     # 最終的にtop_nに絞る
     result = result.sort_values('similarity_score', ascending=False).head(top_n)
@@ -903,6 +1171,118 @@ def get_similar_es_samples(similar_es, top_n=3):
 
     return samples
 
+def get_episode_type_similar_es_samples(similar_es, input_text, top_n=3):
+    """
+    同じエピソードタイプの類似ESのサンプルを取得
+
+    Args:
+        similar_es: 類似度計算済みのES DataFrame
+        input_text: ユーザー入力のES本文
+        top_n: 返すサンプル数
+
+    Returns:
+        dict: {
+            'episodeType': エピソードタイプ名,
+            'episodeTypeJa': エピソードタイプの日本語名,
+            'confidence': 信頼度,
+            'samples': [類似ESのリスト],
+            'totalCount': 同じエピソードタイプのES総数
+        }
+    """
+    # 入力ESのエピソードタイプを判定
+    input_episode_info = classify_episode_type(input_text)
+    input_episode_type = input_episode_info['type']
+    input_confidence = input_episode_info['confidence']
+
+    print(f"  🎯 入力ESのエピソードタイプ: {input_episode_type} (信頼度: {input_confidence})")
+
+    # 同じエピソードタイプのESをフィルタリング
+    same_episode_es = similar_es[
+        similar_es['episode_type'].apply(lambda x: x['type'] == input_episode_type)
+    ]
+
+    # 件数が少ない場合は、マルチラベルでも検索
+    if len(same_episode_es) < top_n:
+        print(f"  ⚠️ 同一エピソードタイプのESが{len(same_episode_es)}件のみ。マルチラベルで追加検索...")
+
+        # マルチラベルで同じエピソードタイプを含むESを追加
+        multi_episode_es = similar_es[
+            similar_es['episode_types_multi'].apply(
+                lambda types: any(t['type'] == input_episode_type for t in types)
+            )
+        ]
+
+        # 重複を除外して結合
+        same_episode_es = pd.concat([same_episode_es, multi_episode_es]).drop_duplicates()
+
+    total_count = len(same_episode_es)
+
+    if total_count == 0:
+        return {
+            'episodeType': input_episode_type,
+            'episodeTypeJa': input_episode_type,
+            'confidence': input_confidence,
+            'samples': [],
+            'totalCount': 0,
+            'message': f'「{input_episode_type}」カテゴリのESが見つかりませんでした'
+        }
+
+    # 上位top_nのサンプルを取得
+    samples = []
+
+    for idx, row in same_episode_es.head(top_n).iterrows():
+        user_info = str(row.get('user_info', ''))
+
+        # 卒業年度を抽出
+        grad_year_match = re.search(r'(\d{2})卒', user_info)
+        grad_year = grad_year_match.group(1) + '卒' if grad_year_match else '不明'
+
+        university = row.get('university', '不明')
+
+        # 学部・学科を抽出
+        major_match = re.search(r'\|\s*([^|]+)\s*\|', user_info)
+        major = major_match.group(1).strip() if major_match else '不明'
+
+        es_content = []
+        for i in range(1, 4):
+            question = row.get(f'question_{i}', '')
+            answer = row.get(f'answer_{i}', '')
+
+            if question and answer and str(question).strip() and str(answer).strip():
+                es_content.append({
+                    'question': str(question).strip(),
+                    'answer': str(answer).strip()[:500] + ('...' if len(str(answer)) > 500 else '')
+                })
+
+        if len(es_content) > 0:
+            # エピソード情報を取得
+            episode_info = row['episode_type']
+
+            sample = {
+                'company': str(row['company_name']),
+                'industry': str(row['industry']) if not pd.isna(row['industry']) else '不明',
+                'result': str(row['result_status']),
+                'similarity': round(float(row['similarity_score']) * 100, 1),
+                'episodeType': episode_info['type'],
+                'episodeConfidence': episode_info['confidence'],
+                'profile': {
+                    'university': university,
+                    'major': major,
+                    'gradYear': grad_year
+                },
+                'esContent': es_content
+            }
+            samples.append(sample)
+
+    return {
+        'episodeType': input_episode_type,
+        'episodeTypeJa': input_episode_type,  # 日本語名（既に日本語）
+        'confidence': input_confidence,
+        'samples': samples,
+        'totalCount': total_count,
+        'message': f'同じ「{input_episode_type}」カテゴリから{len(samples)}件のESを抽出しました'
+    }
+
 # ============================================
 # HTMLテンプレート（美しいUI）
 # ============================================
@@ -993,6 +1373,17 @@ def analyze_es():
         similar_es_samples = get_similar_es_samples(similar_es, top_n=3)
         industry_similar_es_samples = get_industry_similar_es_samples(similar_es, data['targetIndustry'], top_n=3)
 
+        # 入力ESのエピソードタイプを判定
+        input_episode_info = classify_episode_type(combined_answers)
+        input_episode_types_multi = classify_multiple_episode_types(combined_answers, top_n=2)
+
+        # エピソードタイプ別の類似ES
+        episode_type_similar_es_samples = get_episode_type_similar_es_samples(
+            similar_es,
+            combined_answers,
+            top_n=3
+        )
+
         # 志望企業のマッチ率を計算（第三志望まで）
         target_companies_match = []
         if data.get('targetCompanies') and len(data['targetCompanies']) > 0:
@@ -1034,6 +1425,7 @@ def analyze_es():
             'esAnalysis': es_analysis,
             'similarESSamples': similar_es_samples,
             'industrySimilarESSamples': industry_similar_es_samples,  # 業界内の類似ES
+            'episodeTypeSimilarESSamples': episode_type_similar_es_samples,  # エピソードタイプ別の類似ES
             'targetCompaniesMatch': target_companies_match,  # 第三志望までのマッチ率
             'dataStatistics': {
                 'totalEsCount': total_es_count,
@@ -1046,6 +1438,10 @@ def analyze_es():
                 'university': data.get('university'),
                 'major': data.get('major'),
                 'graduationYear': data.get('graduationYear')
+            },
+            'episodeTypeInfo': {  # エピソードタイプ情報
+                'primary': input_episode_info,
+                'all': input_episode_types_multi
             }
         }
 
