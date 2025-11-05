@@ -558,6 +558,9 @@ def get_top_companies(similar_es, user_industry, user_university="", top_n=5):
     companies = []
     seen_companies = set()
 
+    # まず十分な数の企業を処理（top_nの3倍または最低20社）
+    process_count = max(top_n * 3, 20)
+
     for _, row in similar_es.iterrows():
         company_name = row['company_name']
 
@@ -606,10 +609,13 @@ def get_top_companies(similar_es, user_industry, user_university="", top_n=5):
             'employeeCount': row.get('employee_count', '不明'),
         })
 
-        if len(companies) >= top_n:
+        # 十分な数の企業を処理したら終了
+        if len(companies) >= process_count:
             break
 
-    return companies
+    # matchScoreで降順ソートしてtop_nを返す
+    companies.sort(key=lambda x: x['matchScore'], reverse=True)
+    return companies[:top_n]
 
 def calculate_target_company_match(company_name, similar_es, user_industry, user_university="", rank=1):
     """特定の志望企業とのマッチ率を計算（志望順位に応じて調整）"""
