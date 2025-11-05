@@ -553,6 +553,15 @@ def home():
     """フロントエンドUI - データを埋め込んだHTMLを返す"""
     print("\n🌐 ページ生成中...")
 
+    # 企業と業界のマッピングを作成
+    company_industries = {}
+    for company in companies_list[:300]:
+        company_data = es_data[es_data['company_name'] == company]
+        if len(company_data) > 0:
+            # 最も多い業界を取得
+            industry = company_data['industry'].mode()[0] if len(company_data['industry'].mode()) > 0 else '不明'
+            company_industries[company] = industry
+
     # 選択肢データを準備
     embedded_data = {
         'universities': universities_list[:200],  # 最初の200校
@@ -560,7 +569,8 @@ def home():
         'companies': companies_list[:300],  # 最初の300社
         'commonQuestions': common_questions,
         'companyCounts': {k: v for k, v in company_counts.items() if k in companies_list[:300]},
-        'industryCounts': industry_counts
+        'industryCounts': industry_counts,
+        'companyIndustries': company_industries  # 企業と業界のマッピング
     }
 
     # JSONシリアライズ（ensure_ascii=Trueで安全に）
