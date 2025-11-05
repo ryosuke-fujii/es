@@ -266,8 +266,8 @@ def get_top_companies(similar_es, user_industry, user_university="", top_n=5):
 
     return companies
 
-def calculate_target_company_match(company_name, similar_es, user_industry, user_university=""):
-    """特定の志望企業とのマッチ率を計算"""
+def calculate_target_company_match(company_name, similar_es, user_industry, user_university="", rank=1):
+    """特定の志望企業とのマッチ率を計算（志望順位に応じて調整）"""
     # 企業データを検索
     company_data = es_data[es_data['company_name'] == company_name]
 
@@ -275,11 +275,18 @@ def calculate_target_company_match(company_name, similar_es, user_industry, user
         # データがない場合は、類似ESの平均スコアを使用
         if len(similar_es) > 0:
             avg_score = similar_es['similarity_score'].mean()
+            base_score = min(int(avg_score * 70), 100)  # 控えめなスコア
+
+            # 志望順位による調整
+            rank_adjustment = 1.0 if rank == 1 else (0.95 if rank == 2 else 0.9)
+            adjusted_score = int(base_score * rank_adjustment)
+
             return {
                 'name': company_name,
                 'industry': '不明',
-                'matchScore': min(int(avg_score * 70), 100),  # 控えめなスコア
-                'reason': 'データ不足のため推定値です'
+                'matchScore': adjusted_score,
+                'reason': 'データ不足のため推定値です',
+                'dataCount': 0
             }
         return None
 
@@ -298,12 +305,16 @@ def calculate_target_company_match(company_name, similar_es, user_industry, user
     industry_match = 1.0 if user_industry in str(representative['industry']) else 0.5
     university_match = 1.0 if user_university and user_university == representative.get('university') else 0.5
 
-    match_score = calculate_match_score(
+    base_match_score = calculate_match_score(
         avg_similarity,
         difficulty,
         industry_match,
         university_match
     )
+
+    # 志望順位による調整（第一志望=100%、第二志望=95%、第三志望=90%）
+    rank_adjustment = 1.0 if rank == 1 else (0.95 if rank == 2 else 0.9)
+    match_score = int(base_match_score * rank_adjustment)
 
     reasons = []
     if avg_similarity > 0.3:
@@ -314,6 +325,8 @@ def calculate_target_company_match(company_name, similar_es, user_industry, user
         reasons.append('同じ大学からの採用実績')
     if len(company_data) >= 10:
         reasons.append(f'{len(company_data)}件の合格ES実績あり')
+    elif len(company_data) >= 5:
+        reasons.append(f'{len(company_data)}件のES実績あり')
 
     reason = '、'.join(reasons) if reasons else 'データマッチング'
 
@@ -321,7 +334,8 @@ def calculate_target_company_match(company_name, similar_es, user_industry, user
         'name': company_name,
         'industry': str(representative['industry']) if not pd.isna(representative['industry']) else '不明',
         'matchScore': match_score,
-        'reason': reason
+        'reason': reason,
+        'dataCount': len(company_data)
     }
 
 def analyze_industry(industry):
@@ -550,16 +564,37 @@ def analyze_es():
         # 志望企業のマッチ率を計算（第三志望まで）
         target_companies_match = []
         if data.get('targetCompanies') and len(data['targetCompanies']) > 0:
-            for target_company in data['targetCompanies']:
+            for i, target_company in enumerate(data['targetCompanies'], 1):
                 if target_company and target_company.strip():
                     match_result = calculate_target_company_match(
                         target_company,
                         similar_es,
                         data['targetIndustry'],
-                        data.get('university', '')
+                        data.get('university', ''),
+                        rank=i  # 志望順位を渡す
                     )
                     if match_result:
+                        # 志望順位を追加
+                        match_result['rank'] = i
                         target_companies_match.append(match_result)
+
+        # 統計情報を計算
+        total_es_count = len(es_data)
+        matched_es_count = len(similar_es)
+        industry_es_count = len(es_data[es_data['industry'].str.contains(data['targetIndustry'], na=False)])
+
+        # 志望企業のデータ数をカウント
+        target_companies_data_count = {}
+        if data.get('targetCompanies') and len(data['targetCompanies']) > 0:
+            for target_company in data['targetCompanies']:
+                if target_company and target_company.strip():
+                    count = len(es_data[es_data['company_name'] == target_company])
+                    target_companies_data_count[target_company] = count
+
+        # 第三志望までのマッチ率の平均を計算
+        avg_match_rate = 0
+        if len(target_companies_match) > 0:
+            avg_match_rate = sum(item['matchScore'] for item in target_companies_match) / len(target_companies_match)
 
         response = {
             'matchCompanies': top_companies,
@@ -567,6 +602,13 @@ def analyze_es():
             'esAnalysis': es_analysis,
             'similarESSamples': similar_es_samples,
             'targetCompaniesMatch': target_companies_match,  # 第三志望までのマッチ率
+            'dataStatistics': {
+                'totalEsCount': total_es_count,
+                'matchedEsCount': matched_es_count,
+                'industryEsCount': industry_es_count,
+                'targetCompaniesDataCount': target_companies_data_count,
+                'avgMatchRate': round(avg_match_rate, 1)
+            },
             'userInfo': {
                 'university': data.get('university'),
                 'major': data.get('major'),
