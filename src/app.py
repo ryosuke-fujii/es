@@ -39,6 +39,60 @@ INDUSTRY_MAJOR_CATEGORIES = [
     '金融'
 ]
 
+# ESテーマカテゴリ体系（実データ分析に基づく）
+ES_THEME_CATEGORIES = {
+    # 活動フィールド
+    '研究・学術活動': [
+        '研究', 'ゼミ', '論文', '学会', '実験', '調査', '分析', '考察'
+    ],
+    'ビジネス経験': [
+        'インターン', 'アルバイト', '長期インターン', '実務経験', '職務経験', '営業', '接客'
+    ],
+    '課外活動': [
+        'サークル', '部活', '学生団体', 'ボランティア', '課外', 'スポーツ'
+    ],
+    # アクション・スキル
+    '課題解決・改善': [
+        '課題', '問題', '解決', '改善', '克服', '対策', '施策', '打開'
+    ],
+    'リーダーシップ・組織運営': [
+        'リーダー', '代表', 'マネジメント', '統率', '組織', '運営', '主導'
+    ],
+    'チームワーク・協働': [
+        'チーム', 'メンバー', '協力', '連携', '協働', 'グループ', '共同'
+    ],
+    '企画・提案': [
+        '企画', '提案', 'アイデア', '立案', '新規', '発案', 'プラン'
+    ],
+    '技術開発・創造': [
+        '開発', 'プログラミング', 'システム', '設計', '実装', '制作', '構築'
+    ],
+    # マインド・姿勢
+    '挑戦・目標達成': [
+        '挑戦', '目標', '達成', 'チャレンジ', '新しい', '初めて', '未経験'
+    ],
+    '困難克服・逆境': [
+        '困難', '失敗', '乗り越え', '苦労', '壁', '逆境', 'トラブル', '危機'
+    ],
+    '成長・学習': [
+        '成長', '学び', '習得', '経験', '気づき', '獲得', '身につけた'
+    ],
+    # 成果・インパクト
+    '定量的成果': [
+        '売上', '増加', '削減', '向上', '%', '倍', '人', '件', '円', '達成率'
+    ],
+    '社会貢献・影響力': [
+        '社会', '貢献', '支援', '地域', '影響', '価値', 'インパクト'
+    ],
+    # 志望動機・キャリア
+    '企業理解・共感': [
+        '理念', 'ビジョン', '事業', '強み', '魅力', '特徴', '姿勢', '取り組み'
+    ],
+    'キャリアビジョン': [
+        '将来', 'キャリア', '実現したい', '成し遂げたい', '目指す', '夢'
+    ]
+}
+
 # Flaskアプリケーションの初期化
 # templatesフォルダを親ディレクトリから読み込む
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -88,6 +142,47 @@ def extract_major_industry_category(industry):
 
     return None
 
+def categorize_es_themes(text):
+    """ESのテーマをマルチラベルで判定"""
+    if pd.isna(text) or not text:
+        return []
+
+    text_str = str(text)
+    matched_themes = []
+
+    for theme_name, keywords in ES_THEME_CATEGORIES.items():
+        # キーワードマッチング
+        keyword_count = sum(1 for kw in keywords if kw in text_str)
+
+        # 閾値を超えたらテーマとして認定（2個以上）
+        if keyword_count >= 2:
+            matched_themes.append({
+                'theme': theme_name,
+                'score': keyword_count
+            })
+
+    # スコアでソート
+    matched_themes.sort(key=lambda x: x['score'], reverse=True)
+
+    return matched_themes if matched_themes else [{'theme': 'その他', 'score': 0}]
+
+def extract_theme_keywords_for_weighting(text):
+    """重要キーワードに重み付けしたテキストを生成"""
+    if pd.isna(text) or not text:
+        return str(text)
+
+    text_str = str(text)
+    weighted_text = text_str
+
+    # テーマ別に重要キーワードを抽出して重み付け
+    for theme_name, keywords in ES_THEME_CATEGORIES.items():
+        for keyword in keywords:
+            if keyword in text_str:
+                # キーワードを3回繰り返して重要度を上げる
+                weighted_text += f" {keyword} {keyword} {keyword}"
+
+    return weighted_text
+
 def load_csv_data(csv_path):
     """CSVデータを読み込んで整形"""
     global es_data, vectorizer, tfidf_matrix
@@ -131,15 +226,24 @@ def load_csv_data(csv_path):
 
     print(f"✅ 有効なESデータ: {len(es_data)}件")
 
-    print("🔧 TF-IDFベクトル化中...")
+    # テーマカテゴリ分析を追加
+    print("🔧 ESのテーマ分析中...")
+    es_data['themes'] = es_data['combined_answer'].apply(categorize_es_themes)
+
+    # 重要キーワードの重み付けテキストを生成
+    print("🔧 キーワード重み付け中...")
+    es_data['weighted_answer'] = es_data['combined_answer'].apply(extract_theme_keywords_for_weighting)
+
+    print("🔧 TF-IDFベクトル化中（最適化済みパラメータ）...")
     vectorizer = TfidfVectorizer(
-        max_features=1000,
+        max_features=3000,  # 1000 → 3000に増加
         min_df=2,
         max_df=0.8,
-        ngram_range=(1, 2)
+        ngram_range=(1, 3)  # (1,2) → (1,3)に拡張
     )
 
-    tfidf_matrix = vectorizer.fit_transform(es_data['combined_answer'])
+    # 重み付けされたテキストを使用してベクトル化
+    tfidf_matrix = vectorizer.fit_transform(es_data['weighted_answer'])
     print(f"✅ ベクトル化完了: {tfidf_matrix.shape}")
 
     print("\n📊 データ統計:")
@@ -192,8 +296,10 @@ def load_csv_data(csv_path):
     print(f"  - 企業: {len(companies_list)}社")
 
 def calculate_similarity(input_text, top_n=100):
-    """類似度計算"""
-    input_vector = vectorizer.transform([input_text])
+    """類似度計算（キーワード重み付け適用）"""
+    # 入力テキストにも同じ重み付けを適用
+    weighted_input = extract_theme_keywords_for_weighting(input_text)
+    input_vector = vectorizer.transform([weighted_input])
     similarities = cosine_similarity(input_vector, tfidf_matrix)[0]
 
     result = es_data.copy()
