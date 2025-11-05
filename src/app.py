@@ -456,6 +456,578 @@ def classify_multiple_episode_types(text, top_n=2):
 
     return [{'type': 'その他の経験', 'confidence': 0}]
 
+def extract_quantitative_achievement_score(text):
+    """
+    定量的成果のスコアを計算（網羅的パターン対応）
+
+    Args:
+        text (str): ES本文
+
+    Returns:
+        float: 成果スコア（0.0〜1.0）
+    """
+    if pd.isna(text) or not text:
+        return 0.0
+
+    text_str = str(text)
+    score = 0.0
+
+    # ============================================
+    # カテゴリ1: パーセンテージ系（最重要）
+    # ============================================
+
+    # パターン1-1: ◯%向上/増加/改善/達成/上昇
+    percentage_positive = re.findall(
+        r'(\d+(?:\.\d+)?)%?(?:％)?(?:向上|増加|改善|達成|上昇|伸び|アップ|UP|成長|拡大|上がった|高まった)',
+        text_str
+    )
+    for match in percentage_positive:
+        value = float(match)
+        if value >= 100:
+            score += 0.35  # 100%以上（2倍以上）
+        elif value >= 50:
+            score += 0.30  # 50-100%
+        elif value >= 30:
+            score += 0.25  # 30-50%
+        elif value >= 20:
+            score += 0.20  # 20-30%
+        elif value >= 10:
+            score += 0.15  # 10-20%
+        elif value >= 5:
+            score += 0.10  # 5-10%
+        else:
+            score += 0.05  # 5%未満
+
+    # パターン1-2: ◯%削減/減少/短縮（コスト削減・効率化）
+    percentage_reduction = re.findall(
+        r'(\d+(?:\.\d+)?)%?(?:％)?(?:削減|減少|短縮|カット|削った|減らした|低減)',
+        text_str
+    )
+    for match in percentage_reduction:
+        value = float(match)
+        if value >= 50:
+            score += 0.30
+        elif value >= 30:
+            score += 0.25
+        elif value >= 20:
+            score += 0.20
+        elif value >= 10:
+            score += 0.15
+        else:
+            score += 0.10
+
+    # パターン1-3: ◯ポイント向上（満足度など）
+    point_increase = re.findall(
+        r'(\d+(?:\.\d+)?)(?:ポイント|pt|点)(?:向上|上昇|アップ|増加|改善)',
+        text_str
+    )
+    for match in point_increase:
+        value = float(match)
+        if value >= 20:
+            score += 0.25
+        elif value >= 10:
+            score += 0.20
+        elif value >= 5:
+            score += 0.15
+        else:
+            score += 0.10
+
+    # ============================================
+    # カテゴリ2: 倍数系
+    # ============================================
+
+    # パターン2-1: ◯倍
+    multiplier = re.findall(r'(\d+(?:\.\d+)?)倍', text_str)
+    for match in multiplier:
+        value = float(match)
+        if value >= 5:
+            score += 0.35  # 5倍以上
+        elif value >= 3:
+            score += 0.30  # 3-5倍
+        elif value >= 2:
+            score += 0.25  # 2-3倍
+        else:
+            score += 0.15  # 2倍未満
+
+    # ============================================
+    # カテゴリ3: 人数・規模系
+    # ============================================
+
+    # パターン3-1: ◯人（対象者数）
+    people_patterns = [
+        r'(\d+)人(?:以上)?(?:の|を|に|へ)?(?:生徒|学生|社員|メンバー|顧客|お客様|参加者|受講者)',
+        r'(?:生徒|学生|社員|メンバー|顧客|お客様|参加者|受講者)(?:数)?(?:が)?(\d+)人',
+        r'(\d+)名(?:の|を|に|へ)?(?:生徒|学生|社員|メンバー|顧客|お客様|参加者|受講者)',
+    ]
+
+    for pattern in people_patterns:
+        people_matches = re.findall(pattern, text_str)
+        for match in people_matches:
+            value = int(match)
+            if value >= 200:
+                score += 0.25  # 200人以上
+            elif value >= 100:
+                score += 0.20  # 100-200人
+            elif value >= 50:
+                score += 0.15  # 50-100人
+            elif value >= 20:
+                score += 0.10  # 20-50人
+            elif value >= 10:
+                score += 0.08  # 10-20人
+            else:
+                score += 0.05  # 10人未満
+
+    # パターン3-2: チーム規模
+    team_patterns = re.findall(r'(\d+)人(?:チーム|のチーム|規模|体制|メンバー構成)', text_str)
+    for match in team_patterns:
+        value = int(match)
+        if value >= 20:
+            score += 0.15
+        elif value >= 10:
+            score += 0.12
+        elif value >= 5:
+            score += 0.10
+
+    # ============================================
+    # カテゴリ4: 金額系
+    # ============================================
+
+    # パターン4-1: 売上・利益
+    money_patterns = [
+        r'(\d+)(?:万|億)?円(?:の)?(?:売上|売り上げ|利益|収益|収入)',
+        r'(?:売上|売り上げ|利益|収益|収入)(?:が)?(\d+)(?:万|億)?円',
+        r'(\d+)(?:万|億)(?:円)?(?:の)?(?:売上|売り上げ|利益|収益|収入)',
+    ]
+
+    has_money_achievement = False
+    for pattern in money_patterns:
+        money_matches = re.findall(pattern, text_str)
+        if money_matches:
+            has_money_achievement = True
+            score += 0.20  # 金額を伴う成果
+            break
+
+    # パターン4-2: コスト削減
+    cost_reduction = re.findall(
+        r'(\d+)(?:万|億)?円(?:の)?(?:削減|コスト削減|経費削減|節約)',
+        text_str
+    )
+    if cost_reduction:
+        score += 0.20
+
+    # ============================================
+    # カテゴリ5: 順位・ランキング系
+    # ============================================
+
+    # パターン5-1: 順位
+    ranking_patterns = [
+        r'(?:第)?([1-3])位(?:を)?(?:獲得|達成|入賞)',
+        r'([1-3])位(?:に)?(?:なった|なり|入った)',
+        r'(?:全国|地区|県|市|学内)(?:で)?([1-3])位',
+    ]
+
+    for pattern in ranking_patterns:
+        ranking_matches = re.findall(pattern, text_str)
+        for match in ranking_matches:
+            rank = int(match)
+            if rank == 1:
+                score += 0.30  # 1位
+            elif rank == 2:
+                score += 0.20  # 2位
+            elif rank == 3:
+                score += 0.15  # 3位
+
+    # パターン5-2: トップ
+    if re.search(r'(?:トップ|TOP|No\.1|ナンバーワン)', text_str):
+        score += 0.25
+
+    # パターン5-3: 優勝・入賞
+    awards = re.findall(
+        r'(?:優勝|準優勝|入賞|受賞|表彰|金賞|銀賞|銅賞|最優秀賞|優秀賞)',
+        text_str
+    )
+    if '優勝' in awards:
+        score += 0.30
+    elif '準優勝' in awards or '金賞' in awards or '最優秀賞' in awards:
+        score += 0.25
+    elif awards:
+        score += 0.15
+
+    # ============================================
+    # カテゴリ6: 目標達成系
+    # ============================================
+
+    # パターン6-1: 目標達成率
+    achievement_rate = re.findall(
+        r'(?:目標)?(?:達成率)(?:が)?(\d+(?:\.\d+)?)%',
+        text_str
+    )
+    for match in achievement_rate:
+        value = float(match)
+        if value >= 120:
+            score += 0.25  # 120%以上達成
+        elif value >= 100:
+            score += 0.20  # 100%達成
+        elif value >= 80:
+            score += 0.10  # 80%以上
+
+    # パターン6-2: 目標達成（定性的）
+    if re.search(r'目標(?:を)?(?:達成|クリア|突破|超え)', text_str):
+        score += 0.15
+
+    # ============================================
+    # カテゴリ7: 期間・頻度系
+    # ============================================
+
+    # パターン7-1: 連続記録
+    consecutive = re.findall(
+        r'(\d+)(?:ヶ月|か月|ヵ月|カ月|年|週)(?:連続|継続)',
+        text_str
+    )
+    for match in consecutive:
+        value = int(match)
+        if value >= 12:
+            score += 0.20  # 12ヶ月以上連続
+        elif value >= 6:
+            score += 0.15  # 6-12ヶ月連続
+        elif value >= 3:
+            score += 0.10  # 3-6ヶ月連続
+
+    # パターン7-2: 期間内での成果
+    time_based = re.findall(
+        r'(\d+)(?:ヶ月|か月|週間|日)(?:で|以内に)(?:達成|実現|完成|完了)',
+        text_str
+    )
+    if time_based:
+        score += 0.10  # 期限を意識した成果
+
+    # ============================================
+    # カテゴリ8: その他の定量的表現
+    # ============================================
+
+    # パターン8-1: 満足度スコア
+    satisfaction_score = re.findall(
+        r'(?:満足度|評価)(?:が)?(\d+(?:\.\d+)?)(?:点|/10|/5)',
+        text_str
+    )
+    if satisfaction_score:
+        score += 0.15
+
+    # パターン8-2: 参加者数・応募者数
+    participant_numbers = re.findall(
+        r'(\d+)人(?:が|の)?(?:参加|応募|エントリー|集まった)',
+        text_str
+    )
+    for match in participant_numbers:
+        value = int(match)
+        if value >= 100:
+            score += 0.15
+        elif value >= 50:
+            score += 0.12
+        elif value >= 20:
+            score += 0.10
+
+    # パターン8-3: 回数・頻度
+    frequency = re.findall(
+        r'(\d+)回(?:以上)?(?:実施|開催|実行|達成)',
+        text_str
+    )
+    for match in frequency:
+        value = int(match)
+        if value >= 50:
+            score += 0.15
+        elif value >= 20:
+            score += 0.12
+        elif value >= 10:
+            score += 0.10
+
+    # パターン8-4: 合格率・成功率
+    success_rate = re.findall(
+        r'(?:合格率|成功率|達成率)(?:が)?(\d+(?:\.\d+)?)%',
+        text_str
+    )
+    if success_rate:
+        score += 0.15
+
+    # ============================================
+    # 最終調整
+    # ============================================
+
+    # スコアの上限を1.0に制限
+    final_score = min(score, 1.0)
+
+    return final_score
+
+def calculate_detail_score(text):
+    """
+    文章の詳細度を評価（網羅的評価基準）
+
+    Args:
+        text (str): ES本文
+
+    Returns:
+        float: 詳細度スコア（0.0〜1.0）
+    """
+    if pd.isna(text) or not text:
+        return 0.0
+
+    text_str = str(text)
+    score = 0.0
+
+    # ============================================
+    # カテゴリ1: 論理展開・接続詞（最重要）
+    # ============================================
+
+    # 論理展開の接続詞
+    logical_connectors = {
+        # 因果関係
+        'そのため': 0.08,
+        'したがって': 0.08,
+        'その結果': 0.08,
+        'これにより': 0.08,
+        'よって': 0.06,
+        'ゆえに': 0.06,
+
+        # 対比・逆接
+        'しかし': 0.07,
+        'ところが': 0.07,
+        '一方で': 0.07,
+        'だが': 0.05,
+        'けれども': 0.05,
+
+        # 追加・並列
+        'また': 0.04,
+        'さらに': 0.06,
+        '加えて': 0.06,
+        'そして': 0.03,
+
+        # 具体化
+        '具体的には': 0.10,
+        '例えば': 0.09,
+        '実際に': 0.08,
+        '特に': 0.06,
+
+        # 順序
+        'まず': 0.07,
+        '次に': 0.07,
+        '最後に': 0.07,
+        '第一に': 0.08,
+        '第二に': 0.08,
+        '初めに': 0.06,
+        'その後': 0.05,
+
+        # 補足・説明
+        'なぜなら': 0.08,
+        'つまり': 0.07,
+        'すなわち': 0.07,
+        'というのは': 0.06,
+    }
+
+    for connector, weight in logical_connectors.items():
+        if connector in text_str:
+            score += weight
+
+    # ============================================
+    # カテゴリ2: 具体性の指標
+    # ============================================
+
+    # パターン2-1: 固有名詞（カタカナ語）
+    katakana_words = re.findall(r'[ァ-ヴー]{3,}', text_str)
+    unique_katakana = set(katakana_words)
+
+    # カタカナ語の数に応じてスコア
+    if len(unique_katakana) >= 10:
+        score += 0.15
+    elif len(unique_katakana) >= 7:
+        score += 0.12
+    elif len(unique_katakana) >= 5:
+        score += 0.10
+    elif len(unique_katakana) >= 3:
+        score += 0.08
+    elif len(unique_katakana) >= 1:
+        score += 0.05
+
+    # パターン2-2: ツール・システム名
+    tools_and_systems = [
+        'Excel', 'Word', 'PowerPoint', 'Slack', 'Teams', 'Zoom',
+        'Google', 'Notion', 'Trello', 'Asana', 'Salesforce',
+        'Python', 'JavaScript', 'SQL', 'GitHub', 'AWS',
+        'LINE', 'Instagram', 'Twitter', 'Facebook', 'YouTube'
+    ]
+
+    tool_mentions = sum(1 for tool in tools_and_systems if tool in text_str)
+    score += min(tool_mentions * 0.05, 0.15)
+
+    # パターン2-3: 具体的な手法・フレームワーク
+    methodologies = [
+        'PDCA', 'KPI', 'KGI', 'SWOT', 'PEST', '5W1H',
+        'ロジックツリー', 'マインドマップ', 'ガントチャート',
+        'ブレインストーミング', 'アンケート', 'ヒアリング'
+    ]
+
+    methodology_mentions = sum(1 for method in methodologies if method in text_str)
+    score += min(methodology_mentions * 0.06, 0.18)
+
+    # ============================================
+    # カテゴリ3: 数値の多様性
+    # ============================================
+
+    # 数値の種類数
+    numbers = re.findall(r'\d+(?:\.\d+)?', text_str)
+    unique_numbers = set(numbers)
+
+    if len(unique_numbers) >= 10:
+        score += 0.15
+    elif len(unique_numbers) >= 7:
+        score += 0.12
+    elif len(unique_numbers) >= 5:
+        score += 0.10
+    elif len(unique_numbers) >= 3:
+        score += 0.08
+    elif len(unique_numbers) >= 1:
+        score += 0.05
+
+    # ============================================
+    # カテゴリ4: 問題解決の構造
+    # ============================================
+
+    # パターン4-1: 課題認識
+    problem_awareness = [
+        '課題', '問題', '困難', '障壁', 'ネック', 'ボトルネック',
+        '不足', '欠如', '低下', '悪化', '停滞'
+    ]
+    problem_count = sum(1 for word in problem_awareness if word in text_str)
+    score += min(problem_count * 0.04, 0.12)
+
+    # パターン4-2: 原因分析
+    cause_analysis = [
+        '原因', '要因', '背景', '理由', 'なぜ', '分析',
+        '仮説', '推測', '考察', '洞察'
+    ]
+    cause_count = sum(1 for word in cause_analysis if word in text_str)
+    score += min(cause_count * 0.05, 0.15)
+
+    # パターン4-3: 解決策
+    solution_words = [
+        '解決', '対策', '施策', '改善策', '工夫', '取り組み',
+        '実施', '導入', '提案', 'アプローチ'
+    ]
+    solution_count = sum(1 for word in solution_words if word in text_str)
+    score += min(solution_count * 0.04, 0.12)
+
+    # ============================================
+    # カテゴリ5: 引用・参照
+    # ============================================
+
+    # パターン5-1: 引用符の使用
+    quotation_patterns = [
+        r'「[^」]{5,}」',  # 日本語引用符
+        r'『[^』]{5,}』',  # 日本語二重引用符
+    ]
+
+    quotation_count = 0
+    for pattern in quotation_patterns:
+        quotation_count += len(re.findall(pattern, text_str))
+
+    score += min(quotation_count * 0.05, 0.15)
+
+    # ============================================
+    # カテゴリ6: 視点の多様性
+    # ============================================
+
+    # パターン6-1: 主体の明示
+    subjects = ['私は', '私が', '自分は', '自分が']
+    subject_count = sum(text_str.count(subject) for subject in subjects)
+    score += min(subject_count * 0.02, 0.10)
+
+    # パターン6-2: 他者への言及
+    others = [
+        'メンバー', 'チーム', '同僚', '上司', '先輩', '後輩',
+        '顧客', 'お客様', '生徒', '学生', '参加者'
+    ]
+    others_count = sum(1 for word in others if word in text_str)
+    score += min(others_count * 0.03, 0.12)
+
+    # ============================================
+    # カテゴリ7: 時間軸の明示
+    # ============================================
+
+    # 時間表現
+    time_expressions = [
+        '当初', '初めは', '最初は', '開始時',
+        '途中で', '過程で', 'プロセスで',
+        '最終的に', '結果的に', '最後に',
+        '現在', '今後', '将来'
+    ]
+
+    time_count = sum(1 for expr in time_expressions if expr in text_str)
+    score += min(time_count * 0.04, 0.12)
+
+    # ============================================
+    # カテゴリ8: 文章の長さ（適度な詳しさ）
+    # ============================================
+
+    length = len(text_str)
+
+    # 最適な長さに対してボーナス
+    if 500 <= length <= 800:
+        score += 0.12  # 理想的な長さ
+    elif 400 <= length < 500 or 800 < length <= 1000:
+        score += 0.08  # やや良い長さ
+    elif 300 <= length < 400 or 1000 < length <= 1200:
+        score += 0.05  # 許容範囲
+    # 200文字未満または1200文字超はボーナスなし
+
+    # ============================================
+    # カテゴリ9: 文の多様性
+    # ============================================
+
+    # 句点の数（文の数の目安）
+    sentences = text_str.count('。')
+
+    # 1文あたりの平均文字数
+    avg_sentence_length = length / sentences if sentences > 0 else 0
+
+    # 適度な文の長さ（40-80文字が理想）
+    if 40 <= avg_sentence_length <= 80:
+        score += 0.10
+    elif 30 <= avg_sentence_length < 40 or 80 < avg_sentence_length <= 100:
+        score += 0.05
+
+    # ============================================
+    # カテゴリ10: 専門用語・業界用語
+    # ============================================
+
+    # 専門用語リスト（業界別）
+    technical_terms = [
+        # ビジネス一般
+        'ROI', 'ROAS', 'LTV', 'CAC', 'CRM', 'BtoB', 'BtoC',
+        'マーケティング', 'ブランディング', 'プロモーション',
+
+        # 教育
+        'カリキュラム', 'シラバス', 'アクティブラーニング',
+        '偏差値', '模試', '受験',
+
+        # IT
+        'アルゴリズム', 'データベース', 'API', 'UI', 'UX',
+        'フロントエンド', 'バックエンド',
+
+        # 研究
+        '仮説検証', '実証研究', 'エビデンス', '先行研究',
+    ]
+
+    technical_count = sum(1 for term in technical_terms if term in text_str)
+    score += min(technical_count * 0.04, 0.12)
+
+    # ============================================
+    # 最終調整
+    # ============================================
+
+    # スコアの上限を1.0に制限
+    final_score = min(score, 1.0)
+
+    return final_score
+
 def load_csv_data(csv_path):
     """CSVデータを読み込んで整形"""
     global es_data, vectorizer, tfidf_matrix, sentence_model
@@ -691,7 +1263,7 @@ def load_csv_data(csv_path):
     print(f"  - 企業: {len(companies_list)}社")
 
 def calculate_similarity(input_text, top_n=100):
-    """類似度計算（ハイブリッド：TF-IDF + セマンティック + 構造分析）"""
+    """類似度計算（ハイブリッド：TF-IDF + セマンティック + 構造分析 + テーマフィルタリング + 成果・詳細度）"""
     # 入力テキストにも同じ重み付けを適用
     weighted_input = extract_theme_keywords_for_weighting(input_text)
 
@@ -776,6 +1348,78 @@ def calculate_similarity(input_text, top_n=100):
         # スコアを更新（乗算）
         result.at[idx, 'similarity_score'] = (
             row['similarity_score'] * (1 + theme_bonus)
+        )
+
+    # ============================================
+    # ✅ 新規追加: 定量的成果の重み付け
+    # ============================================
+
+    print("  🔢 定量的成果スコアを計算中...")
+
+    # 入力ESの成果スコア
+    input_achievement = extract_quantitative_achievement_score(input_text)
+
+    for idx, row in result.iterrows():
+        es_achievement = extract_quantitative_achievement_score(row['combined_answer'])
+
+        # 成果レベルの類似度を計算
+        if input_achievement > 0.4 and es_achievement > 0.4:
+            # 両方とも定量的成果が強い（高レベル）→ 大きなボーナス
+            achievement_bonus = 0.20
+        elif input_achievement > 0.2 and es_achievement > 0.2:
+            # 両方とも定量的成果がある（中レベル）→ 中ボーナス
+            achievement_bonus = 0.12
+        elif abs(input_achievement - es_achievement) < 0.15:
+            # 成果レベルが近い → 小ボーナス
+            achievement_bonus = 0.08
+        elif (input_achievement > 0.3 and es_achievement < 0.1) or \
+             (input_achievement < 0.1 and es_achievement > 0.3):
+            # 成果レベルが大きく異なる → ペナルティ
+            achievement_bonus = -0.10
+        else:
+            # その他 → ニュートラル
+            achievement_bonus = 0.0
+
+        # スコアを更新
+        result.at[idx, 'similarity_score'] = (
+            row['similarity_score'] * (1 + achievement_bonus)
+        )
+
+    # ============================================
+    # ✅ 新規追加: 詳細度スコアの重み付け
+    # ============================================
+
+    print("  📝 詳細度スコアを計算中...")
+
+    # 入力ESの詳細度スコア
+    input_detail = calculate_detail_score(input_text)
+
+    for idx, row in result.iterrows():
+        es_detail = calculate_detail_score(row['combined_answer'])
+
+        # 詳細度の類似度を計算
+        detail_diff = abs(input_detail - es_detail)
+
+        if detail_diff < 0.1:
+            # 詳細度が非常に近い → 大きなボーナス
+            detail_bonus = 0.12
+        elif detail_diff < 0.2:
+            # 詳細度が近い → 中ボーナス
+            detail_bonus = 0.08
+        elif detail_diff < 0.3:
+            # 詳細度がやや近い → 小ボーナス
+            detail_bonus = 0.05
+        else:
+            # 詳細度が大きく異なる → ペナルティ
+            detail_bonus = -0.05
+
+        # 両方とも詳細度が高い場合は追加ボーナス
+        if input_detail > 0.6 and es_detail > 0.6:
+            detail_bonus += 0.08
+
+        # スコアを更新
+        result.at[idx, 'similarity_score'] = (
+            row['similarity_score'] * (1 + detail_bonus)
         )
 
     # 最終的にtop_nに絞る
@@ -1171,6 +1815,93 @@ def get_similar_es_samples(similar_es, top_n=3):
 
     return samples
 
+def get_es_samples_by_company(similar_es, company_name, top_n=3):
+    """
+    指定した企業の類似ESサンプルを取得
+
+    Args:
+        similar_es: 類似度計算済みのES DataFrame
+        company_name: 企業名
+        top_n: 返すサンプル数
+
+    Returns:
+        list: ESサンプルのリスト
+    """
+    # この企業のESを類似度順で取得
+    company_es = similar_es[similar_es['company_name'] == company_name]
+
+    if len(company_es) == 0:
+        return []
+
+    samples = []
+
+    for idx, row in company_es.head(top_n).iterrows():
+        user_info = str(row.get('user_info', ''))
+
+        # 卒業年度を抽出
+        grad_year_match = re.search(r'(\d{2})卒', user_info)
+        grad_year = grad_year_match.group(1) + '卒' if grad_year_match else '不明'
+
+        university = row.get('university', '不明')
+
+        # 学部・学科を抽出
+        major_match = re.search(r'\|\s*([^|]+)\s*\|', user_info)
+        major = major_match.group(1).strip() if major_match else '不明'
+
+        es_content = []
+        for i in range(1, 4):
+            question = row.get(f'question_{i}', '')
+            answer = row.get(f'answer_{i}', '')
+
+            if question and answer and str(question).strip() and str(answer).strip():
+                es_content.append({
+                    'question': str(question).strip(),
+                    'answer': str(answer).strip()[:500] + ('...' if len(str(answer)) > 500 else '')
+                })
+
+        if len(es_content) > 0:
+            sample = {
+                'company': str(row['company_name']),
+                'industry': str(row['industry']) if not pd.isna(row['industry']) else '不明',
+                'result': str(row['result_status']),
+                'similarity': round(float(row['similarity_score']) * 100, 1),
+                'profile': {
+                    'university': university,
+                    'major': major,
+                    'gradYear': grad_year
+                },
+                'esContent': es_content
+            }
+            samples.append(sample)
+
+    return samples
+
+def get_similar_es_samples_from_top_companies(similar_es, top_companies):
+    """
+    TOP企業リストに基づいて類似ESのサンプルを取得（順序を維持）
+    ※この関数は後方互換性のために残していますが、非推奨です
+
+    Args:
+        similar_es: 類似度計算済みのES DataFrame
+        top_companies: get_top_companies()から返された企業リスト
+
+    Returns:
+        list: TOP企業と同じ順序・同じ企業のESサンプル
+    """
+    samples = []
+
+    for company_info in top_companies:
+        company_name = company_info['name']
+        company_samples = get_es_samples_by_company(similar_es, company_name, top_n=1)
+
+        if len(company_samples) > 0:
+            # matchScoreを追加
+            company_samples[0]['matchScore'] = company_info['matchScore']
+            samples.append(company_samples[0])
+
+    return samples
+
+
 def get_episode_type_similar_es_samples(similar_es, input_text, top_n=3):
     """
     同じエピソードタイプの類似ESのサンプルを取得
@@ -1368,9 +2099,16 @@ def analyze_es():
             top_n=5
         )
 
+        # 各TOP企業にESサンプルを追加（アコーディオン用）
+        for company in top_companies:
+            company['esSamples'] = get_es_samples_by_company(
+                similar_es,
+                company['name'],
+                top_n=3  # 各企業から3件のESを取得
+            )
+
         industry_analysis = analyze_industry(data['targetIndustry'])
         es_analysis = analyze_es_answers(data['esAnswers'])
-        similar_es_samples = get_similar_es_samples(similar_es, top_n=3)
         industry_similar_es_samples = get_industry_similar_es_samples(similar_es, data['targetIndustry'], top_n=3)
 
         # 入力ESのエピソードタイプを判定
@@ -1399,6 +2137,12 @@ def analyze_es():
                     if match_result:
                         # 志望順位を追加
                         match_result['rank'] = i
+                        # ESサンプルを追加（アコーディオン用）
+                        match_result['esSamples'] = get_es_samples_by_company(
+                            similar_es,
+                            target_company,
+                            top_n=3  # 各企業から3件のESを取得
+                        )
                         target_companies_match.append(match_result)
 
         # 統計情報を計算
@@ -1420,13 +2164,12 @@ def analyze_es():
             avg_match_rate = sum(item['matchScore'] for item in target_companies_match) / len(target_companies_match)
 
         response = {
-            'matchCompanies': top_companies,
+            'matchCompanies': top_companies,  # 各企業にesSamplesフィールド追加済み（アコーディオン用）
             'industryAnalysis': industry_analysis,
             'esAnalysis': es_analysis,
-            'similarESSamples': similar_es_samples,
             'industrySimilarESSamples': industry_similar_es_samples,  # 業界内の類似ES
             'episodeTypeSimilarESSamples': episode_type_similar_es_samples,  # エピソードタイプ別の類似ES
-            'targetCompaniesMatch': target_companies_match,  # 第三志望までのマッチ率
+            'targetCompaniesMatch': target_companies_match,  # 各企業にesSamplesフィールド追加済み（アコーディオン用）
             'dataStatistics': {
                 'totalEsCount': total_es_count,
                 'matchedEsCount': matched_es_count,
