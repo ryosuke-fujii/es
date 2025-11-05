@@ -16,6 +16,7 @@ import os
 es_data = None
 vectorizer = None
 tfidf_matrix = None
+sentence_model = None  # Sentence-BERTモデル
 
 # 選択肢用データ
 universities_list = []
@@ -183,9 +184,52 @@ def extract_theme_keywords_for_weighting(text):
 
     return weighted_text
 
+def analyze_es_structure(text):
+    """ESの構造を分析してスコアリング（STARフレームワーク）"""
+    if pd.isna(text) or not text:
+        return {
+            'situation': 0,
+            'task': 0,
+            'action': 0,
+            'result': 0,
+            'learning': 0
+        }
+
+    text_str = str(text)
+
+    structure_features = {
+        'situation': 0,  # 状況説明
+        'task': 0,       # 課題・目標
+        'action': 0,     # 具体的行動
+        'result': 0,     # 成果・結果
+        'learning': 0    # 学び
+    }
+
+    # 状況説明の検出
+    situation_keywords = ['において', 'で', 'に所属', 'に参加', '当時', 'では', 'として']
+    structure_features['situation'] = sum(1 for kw in situation_keywords if kw in text_str)
+
+    # 課題・目標の検出
+    task_keywords = ['目標', '課題', 'したい', 'を目指', '改善', '向上', '問題', '必要']
+    structure_features['task'] = sum(1 for kw in task_keywords if kw in text_str)
+
+    # 具体的行動の検出
+    action_keywords = ['私は', '取り組んだ', '実施', '工夫', '提案', '導入', '行った', '考えた']
+    structure_features['action'] = sum(1 for kw in action_keywords if kw in text_str)
+
+    # 成果の検出
+    result_keywords = ['結果', '達成', '向上', '%', '増加', '成功', '実現', '完成']
+    structure_features['result'] = sum(1 for kw in result_keywords if kw in text_str)
+
+    # 学びの検出
+    learning_keywords = ['学んだ', '得た', '身につけた', '気づいた', '経験から', '理解した', '成長']
+    structure_features['learning'] = sum(1 for kw in learning_keywords if kw in text_str)
+
+    return structure_features
+
 def load_csv_data(csv_path):
     """CSVデータを読み込んで整形"""
-    global es_data, vectorizer, tfidf_matrix
+    global es_data, vectorizer, tfidf_matrix, sentence_model
 
     print(f"\n📂 CSVデータを読み込み中: {csv_path}")
     df = pd.read_csv(csv_path)
@@ -246,6 +290,26 @@ def load_csv_data(csv_path):
     tfidf_matrix = vectorizer.fit_transform(es_data['weighted_answer'])
     print(f"✅ ベクトル化完了: {tfidf_matrix.shape}")
 
+    # セマンティックエンベディング生成（Sentence-BERT）
+    print("🔧 セマンティックエンベディング生成中...")
+    try:
+        from sentence_transformers import SentenceTransformer
+
+        if sentence_model is None:
+            sentence_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
+
+        # バッチ処理で効率的にエンベディング生成
+        es_data['semantic_embedding'] = es_data['weighted_answer'].apply(
+            lambda x: sentence_model.encode(str(x)[:512], convert_to_tensor=False)  # 長さ制限
+        )
+        print(f"✅ セマンティックエンベディング完了")
+    except ImportError:
+        print("⚠️ sentence-transformersがインストールされていません。TF-IDFのみを使用します。")
+        es_data['semantic_embedding'] = None
+    except Exception as e:
+        print(f"⚠️ セマンティックエンベディング生成エラー: {e}")
+        es_data['semantic_embedding'] = None
+
     print("\n📊 データ統計:")
     print(f"  - ユニーク企業数: {es_data['company_name'].nunique()}")
     print(f"  - 業界数: {es_data['industry'].nunique()}")
@@ -296,14 +360,72 @@ def load_csv_data(csv_path):
     print(f"  - 企業: {len(companies_list)}社")
 
 def calculate_similarity(input_text, top_n=100):
-    """類似度計算（キーワード重み付け適用）"""
+    """類似度計算（ハイブリッド：TF-IDF + セマンティック + 構造分析）"""
     # 入力テキストにも同じ重み付けを適用
     weighted_input = extract_theme_keywords_for_weighting(input_text)
+
+    # TF-IDF類似度
     input_vector = vectorizer.transform([weighted_input])
-    similarities = cosine_similarity(input_vector, tfidf_matrix)[0]
+    tfidf_similarities = cosine_similarity(input_vector, tfidf_matrix)[0]
+
+    # セマンティック類似度（BERT）
+    semantic_similarities = np.zeros(len(es_data))
+    has_semantic = False
+
+    try:
+        from sentence_transformers import SentenceTransformer
+
+        if sentence_model is not None and es_data['semantic_embedding'].iloc[0] is not None:
+            # 入力テキストのエンベディング生成
+            input_embedding = sentence_model.encode(str(input_text)[:512], convert_to_tensor=False)
+
+            # 全ESとの類似度計算
+            embeddings_matrix = np.vstack(es_data['semantic_embedding'].values)
+            semantic_similarities = cosine_similarity([input_embedding], embeddings_matrix)[0]
+            has_semantic = True
+    except Exception as e:
+        print(f"⚠️ セマンティック類似度計算をスキップ: {e}")
+
+    # ハイブリッドスコア（セマンティックが使える場合は重視）
+    if has_semantic:
+        combined_similarities = (
+            tfidf_similarities * 0.3 +      # キーワードマッチ
+            semantic_similarities * 0.7     # 意味マッチ
+        )
+    else:
+        combined_similarities = tfidf_similarities
+
+    # 構造分析による追加スコアリング
+    input_structure = analyze_es_structure(input_text)
 
     result = es_data.copy()
-    result['similarity_score'] = similarities
+    result['similarity_score'] = combined_similarities
+
+    # 上位候補に対して構造類似度を計算
+    result = result.sort_values('similarity_score', ascending=False).head(top_n * 2)
+
+    # 構造類似度を追加
+    structure_scores = []
+    for idx, row in result.iterrows():
+        es_structure = analyze_es_structure(row['combined_answer'])
+
+        # 構造の一致度を計算
+        structure_similarity = sum(
+            min(input_structure[key], es_structure[key])
+            for key in input_structure.keys()
+        ) / max(sum(input_structure.values()), 1)
+
+        structure_scores.append(structure_similarity)
+
+    result['structure_score'] = structure_scores
+
+    # 最終スコア = 内容類似度 * 0.8 + 構造類似度 * 0.2
+    result['similarity_score'] = (
+        result['similarity_score'] * 0.8 +
+        result['structure_score'] * 0.2
+    )
+
+    # 最終的にtop_nに絞る
     result = result.sort_values('similarity_score', ascending=False).head(top_n)
 
     return result
