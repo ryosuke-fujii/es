@@ -195,7 +195,7 @@
                         <input type="text" class="form-control" id="targetCompany1"
                                list="companies-list" placeholder="企業名を入力または選択">
                         <datalist id="companies-list"></datalist>
-                        <small class="text-muted">入力すると候補が表示されます（データ件数も表示）</small>
+                        <small class="text-muted">入力すると候補が表示されます（業界も表示）</small>
                     </div>
 
                     <!-- 第二志望企業 -->
@@ -205,7 +205,7 @@
                         </label>
                         <input type="text" class="form-control" id="targetCompany2"
                                list="companies-list" placeholder="企業名を入力または選択">
-                        <small class="text-muted">入力すると候補が表示されます（データ件数も表示）</small>
+                        <small class="text-muted">入力すると候補が表示されます（業界も表示）</small>
                     </div>
 
                     <!-- 第三志望企業 -->
@@ -215,7 +215,7 @@
                         </label>
                         <input type="text" class="form-control" id="targetCompany3"
                                list="companies-list" placeholder="企業名を入力または選択">
-                        <small class="text-muted">入力すると候補が表示されます（データ件数も表示）</small>
+                        <small class="text-muted">入力すると候補が表示されます（業界も表示）</small>
                     </div>
 
                     <!-- ES質問と回答 -->
@@ -360,6 +360,7 @@
         let commonQuestions = [];
         let companyCounts = {};
         let industryCounts = {};
+        let companyIndustries = {};
 
         function initializeSelects() {
             console.log('📋 選択肢を初期化中...');
@@ -379,6 +380,7 @@
                 commonQuestions = window.EMBEDDED_DATA.commonQuestions || [];
                 companyCounts = window.EMBEDDED_DATA.companyCounts || {};
                 industryCounts = window.EMBEDDED_DATA.industryCounts || {};
+                companyIndustries = window.EMBEDDED_DATA.companyIndustries || {};
 
                 console.log(`✅ データ取得完了: 大学${universities.length}校, 業界${industries.length}種類, 企業${companies.length}社`);
 
@@ -400,13 +402,13 @@
                     industrySelect.appendChild(option);
                 });
 
-                // 企業名のdatalist（データ数付き）
+                // 企業名のdatalist（業界表示）
                 const companiesList = document.getElementById('companies-list');
                 companies.forEach(comp => {
                     const option = document.createElement('option');
-                    const count = companyCounts[comp] || 0;
+                    const industry = companyIndustries[comp] || '不明';
                     option.value = comp;
-                    option.textContent = `${comp} (${count}件)`;
+                    option.textContent = `${comp} (${industry})`;
                     companiesList.appendChild(option);
                 });
 
@@ -739,6 +741,14 @@
                 document.getElementById('industry-similar-es-section').innerHTML = `
                     <h5 class="text-primary mb-3"><i class="bi bi-file-earmark-text-fill"></i> 志望業界内の類似ES</h5>
                     ${industrySimilarESHtml}
+                `;
+            } else {
+                // 業界内ESがない場合のメッセージ
+                document.getElementById('industry-similar-es-section').innerHTML = `
+                    <h5 class="text-primary mb-3"><i class="bi bi-file-earmark-text-fill"></i> 志望業界内の類似ES</h5>
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i> 志望業界内の類似するESは見つかりませんでした。他の業界のESは「類似する合格ES」セクションをご確認ください。
+                    </div>
                 `;
             }
 
