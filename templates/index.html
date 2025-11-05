@@ -705,8 +705,8 @@
             `;
 
             // 業界内の類似ES
-            if (data.industrySimilarESSamples && data.industrySimilarESSamples.length > 0) {
-                const industrySimilarESHtml = data.industrySimilarESSamples.map(sample => {
+            if (data.industrySimilarESSamples && data.industrySimilarESSamples.samples && data.industrySimilarESSamples.samples.length > 0) {
+                const industrySimilarESHtml = data.industrySimilarESSamples.samples.map(sample => {
                     const badgeClass = sample.result === '内定' ? 'badge-accepted' : 'badge-pass';
                     const badgeText = sample.result === '内定' ? '内定' : '通過';
 
@@ -729,6 +729,7 @@
                                 <div class="alert alert-secondary py-2 mb-2">
                                     <small>
                                         <i class="bi bi-mortarboard"></i> ${sample.profile.university} |
+                                        <i class="bi bi-briefcase"></i> ${sample.industry} |
                                         <i class="bi bi-percent"></i> 類似度: ${sample.similarity}%
                                     </small>
                                 </div>
@@ -738,8 +739,16 @@
                     `;
                 }).join('');
 
+                // 大分類一致の場合はメッセージを追加
+                const matchInfoHtml = data.industrySimilarESSamples.exactMatch
+                    ? ''
+                    : `<div class="alert alert-warning mb-3">
+                        <i class="bi bi-info-circle"></i> 志望業界の完全一致ESが見つからなかったため、「${data.industrySimilarESSamples.matchedCategory}」大分類内の類似ESを表示しています。
+                       </div>`;
+
                 document.getElementById('industry-similar-es-section').innerHTML = `
                     <h5 class="text-primary mb-3"><i class="bi bi-file-earmark-text-fill"></i> 志望業界内の類似ES</h5>
+                    ${matchInfoHtml}
                     ${industrySimilarESHtml}
                 `;
             } else {

@@ -25,6 +25,20 @@ common_questions = []
 company_counts = {}
 industry_counts = {}
 
+# 業界の大分類リスト
+INDUSTRY_MAJOR_CATEGORIES = [
+    'IT・通信',
+    'インフラ・物流・エネルギー',
+    'コンサル・シンクタンク',
+    'サービス',
+    'メーカー・製造業',
+    '不動産',
+    '商社・卸',
+    '小売り',
+    '広告・マスコミ',
+    '金融'
+]
+
 # Flaskアプリケーションの初期化
 # templatesフォルダを親ディレクトリから読み込む
 base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -59,6 +73,20 @@ def extract_university(user_info):
     if match:
         return match.group(1).strip()
     return "不明"
+
+def extract_major_industry_category(industry):
+    """業界名から大分類を抽出"""
+    if pd.isna(industry) or not industry:
+        return None
+
+    industry_str = str(industry).strip()
+
+    # 大分類リストから一致するものを探す
+    for major_category in INDUSTRY_MAJOR_CATEGORIES:
+        if industry_str.startswith(major_category):
+            return major_category
+
+    return None
 
 def load_csv_data(csv_path):
     """CSVデータを読み込んで整形"""
@@ -442,13 +470,27 @@ def analyze_es_answers(answers):
     }
 
 def get_industry_similar_es_samples(similar_es, target_industry, top_n=3):
-    """志望業界内の類似度の高いESのサンプルを取得"""
-    # 志望業界のESのみをフィルタリング
-    industry_es = similar_es[similar_es['industry'].str.contains(target_industry, na=False)]
+    """志望業界内の類似度の高いESのサンプルを取得
 
+    まず小分類（完全一致）で検索し、見つからない場合は大分類で検索する
+    """
+    # 1. まず小分類（完全一致）で検索
+    industry_es = similar_es[similar_es['industry'].str.contains(target_industry, na=False)]
+    exact_match = True
+    matched_category = target_industry
+
+    # 2. 小分類で見つからない場合、大分類で検索
     if len(industry_es) == 0:
-        # 業界内のESがない場合は空のリストを返す
-        return []
+        major_category = extract_major_industry_category(target_industry)
+        if major_category:
+            # 大分類で始まる業界をすべて検索
+            industry_es = similar_es[similar_es['industry'].str.startswith(major_category, na=False)]
+            exact_match = False
+            matched_category = major_category
+
+        # それでも見つからない場合は空のリストを返す
+        if len(industry_es) == 0:
+            return {'samples': [], 'exactMatch': False, 'matchedCategory': None}
 
     samples = []
 
@@ -491,7 +533,11 @@ def get_industry_similar_es_samples(similar_es, target_industry, top_n=3):
             }
             samples.append(sample)
 
-    return samples
+    return {
+        'samples': samples,
+        'exactMatch': exact_match,
+        'matchedCategory': matched_category
+    }
 
 def get_similar_es_samples(similar_es, top_n=3):
     """類似ESのサンプルを取得"""
