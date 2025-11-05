@@ -132,8 +132,12 @@ def load_csv_data(csv_path):
     industries_list = sorted(es_data['industry'].dropna().unique().tolist())
     industries_list = [i for i in industries_list if i and str(i).strip() != ""]
 
-    companies_list = sorted(es_data['company_name'].dropna().unique().tolist())
-    companies_list = [c for c in companies_list if c and str(c).strip() != ""]
+    # 企業リストの処理を改善（前株企業も含める）
+    companies_list = es_data['company_name'].dropna().unique().tolist()
+    # 空文字や空白のみの企業名を除外（ただし、前株企業は保持）
+    companies_list = [c for c in companies_list if c and str(c).strip() != "" and len(str(c).strip()) > 1]
+    # ソート（日本語対応）
+    companies_list = sorted(companies_list, key=lambda x: str(x))
 
     # 企業ごとのデータ件数をカウント
     company_counts = es_data['company_name'].value_counts().to_dict()
@@ -437,6 +441,58 @@ def analyze_es_answers(answers):
         'improvements': improvements if improvements else ['現状で良い内容です']
     }
 
+def get_industry_similar_es_samples(similar_es, target_industry, top_n=3):
+    """志望業界内の類似度の高いESのサンプルを取得"""
+    # 志望業界のESのみをフィルタリング
+    industry_es = similar_es[similar_es['industry'].str.contains(target_industry, na=False)]
+
+    if len(industry_es) == 0:
+        # 業界内のESがない場合は空のリストを返す
+        return []
+
+    samples = []
+
+    for idx, row in industry_es.head(top_n).iterrows():
+        user_info = str(row.get('user_info', ''))
+
+        # 卒業年度を抽出
+        grad_year_match = re.search(r'(\d{2})卒', user_info)
+        grad_year = grad_year_match.group(1) + '卒' if grad_year_match else '不明'
+
+        university = row.get('university', '不明')
+
+        # 学部・学科を抽出
+        major_match = re.search(r'\|\s*([^|]+)\s*\|', user_info)
+        major = major_match.group(1).strip() if major_match else '不明'
+
+        es_content = []
+        for i in range(1, 4):
+            question = row.get(f'question_{i}', '')
+            answer = row.get(f'answer_{i}', '')
+
+            if question and answer and str(question).strip() and str(answer).strip():
+                es_content.append({
+                    'question': str(question).strip(),
+                    'answer': str(answer).strip()[:500] + ('...' if len(str(answer)) > 500 else '')
+                })
+
+        if len(es_content) > 0:
+            sample = {
+                'company': str(row['company_name']),
+                'industry': str(row['industry']) if not pd.isna(row['industry']) else '不明',
+                'result': str(row['result_status']),
+                'similarity': round(float(row['similarity_score']) * 100, 1),
+                'profile': {
+                    'university': university,
+                    'major': major,
+                    'gradYear': grad_year
+                },
+                'esContent': es_content
+            }
+            samples.append(sample)
+
+    return samples
+
 def get_similar_es_samples(similar_es, top_n=3):
     """類似ESのサンプルを取得"""
     samples = []
@@ -560,6 +616,7 @@ def analyze_es():
         industry_analysis = analyze_industry(data['targetIndustry'])
         es_analysis = analyze_es_answers(data['esAnswers'])
         similar_es_samples = get_similar_es_samples(similar_es, top_n=3)
+        industry_similar_es_samples = get_industry_similar_es_samples(similar_es, data['targetIndustry'], top_n=3)
 
         # 志望企業のマッチ率を計算（第三志望まで）
         target_companies_match = []
@@ -601,6 +658,7 @@ def analyze_es():
             'industryAnalysis': industry_analysis,
             'esAnalysis': es_analysis,
             'similarESSamples': similar_es_samples,
+            'industrySimilarESSamples': industry_similar_es_samples,  # 業界内の類似ES
             'targetCompaniesMatch': target_companies_match,  # 第三志望までのマッチ率
             'dataStatistics': {
                 'totalEsCount': total_es_count,
