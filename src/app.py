@@ -1171,31 +1171,27 @@ def get_similar_es_samples(similar_es, top_n=3):
 
     return samples
 
-def get_similar_es_samples_from_top_companies(similar_es, top_companies):
+def get_es_samples_by_company(similar_es, company_name, top_n=3):
     """
-    TOP企業リストに基づいて類似ESのサンプルを取得（順序を維持）
+    指定した企業の類似ESサンプルを取得
 
     Args:
         similar_es: 類似度計算済みのES DataFrame
-        top_companies: get_top_companies()から返された企業リスト
+        company_name: 企業名
+        top_n: 返すサンプル数
 
     Returns:
-        list: TOP企業と同じ順序・同じ企業のESサンプル
+        list: ESサンプルのリスト
     """
+    # この企業のESを類似度順で取得
+    company_es = similar_es[similar_es['company_name'] == company_name]
+
+    if len(company_es) == 0:
+        return []
+
     samples = []
 
-    for company_info in top_companies:
-        company_name = company_info['name']
-
-        # この企業のESを類似度順で取得
-        company_es = similar_es[similar_es['company_name'] == company_name]
-
-        if len(company_es) == 0:
-            continue
-
-        # 最も類似度が高いESを1つ取得
-        row = company_es.iloc[0]
-
+    for idx, row in company_es.head(top_n).iterrows():
         user_info = str(row.get('user_info', ''))
 
         # 卒業年度を抽出
@@ -1225,7 +1221,6 @@ def get_similar_es_samples_from_top_companies(similar_es, top_companies):
                 'industry': str(row['industry']) if not pd.isna(row['industry']) else '不明',
                 'result': str(row['result_status']),
                 'similarity': round(float(row['similarity_score']) * 100, 1),
-                'matchScore': company_info['matchScore'],  # TOP企業のマッチスコアを追加
                 'profile': {
                     'university': university,
                     'major': major,
@@ -1236,6 +1231,32 @@ def get_similar_es_samples_from_top_companies(similar_es, top_companies):
             samples.append(sample)
 
     return samples
+
+def get_similar_es_samples_from_top_companies(similar_es, top_companies):
+    """
+    TOP企業リストに基づいて類似ESのサンプルを取得（順序を維持）
+    ※この関数は後方互換性のために残していますが、非推奨です
+
+    Args:
+        similar_es: 類似度計算済みのES DataFrame
+        top_companies: get_top_companies()から返された企業リスト
+
+    Returns:
+        list: TOP企業と同じ順序・同じ企業のESサンプル
+    """
+    samples = []
+
+    for company_info in top_companies:
+        company_name = company_info['name']
+        company_samples = get_es_samples_by_company(similar_es, company_name, top_n=1)
+
+        if len(company_samples) > 0:
+            # matchScoreを追加
+            company_samples[0]['matchScore'] = company_info['matchScore']
+            samples.append(company_samples[0])
+
+    return samples
+
 
 def get_episode_type_similar_es_samples(similar_es, input_text, top_n=3):
     """
@@ -1434,10 +1455,16 @@ def analyze_es():
             top_n=5
         )
 
+        # 各TOP企業にESサンプルを追加（アコーディオン用）
+        for company in top_companies:
+            company['esSamples'] = get_es_samples_by_company(
+                similar_es,
+                company['name'],
+                top_n=3  # 各企業から3件のESを取得
+            )
+
         industry_analysis = analyze_industry(data['targetIndustry'])
         es_analysis = analyze_es_answers(data['esAnswers'])
-        # TOP企業と完全連動した類似ESサンプル（順序も同じ、5つ）
-        similar_es_samples = get_similar_es_samples_from_top_companies(similar_es, top_companies)
         industry_similar_es_samples = get_industry_similar_es_samples(similar_es, data['targetIndustry'], top_n=3)
 
         # 入力ESのエピソードタイプを判定
@@ -1466,6 +1493,12 @@ def analyze_es():
                     if match_result:
                         # 志望順位を追加
                         match_result['rank'] = i
+                        # ESサンプルを追加（アコーディオン用）
+                        match_result['esSamples'] = get_es_samples_by_company(
+                            similar_es,
+                            target_company,
+                            top_n=3  # 各企業から3件のESを取得
+                        )
                         target_companies_match.append(match_result)
 
         # 統計情報を計算
@@ -1487,13 +1520,12 @@ def analyze_es():
             avg_match_rate = sum(item['matchScore'] for item in target_companies_match) / len(target_companies_match)
 
         response = {
-            'matchCompanies': top_companies,
+            'matchCompanies': top_companies,  # 各企業にesSamplesフィールド追加済み（アコーディオン用）
             'industryAnalysis': industry_analysis,
             'esAnalysis': es_analysis,
-            'similarESSamples': similar_es_samples,
             'industrySimilarESSamples': industry_similar_es_samples,  # 業界内の類似ES
             'episodeTypeSimilarESSamples': episode_type_similar_es_samples,  # エピソードタイプ別の類似ES
-            'targetCompaniesMatch': target_companies_match,  # 第三志望までのマッチ率
+            'targetCompaniesMatch': target_companies_match,  # 各企業にesSamplesフィールド追加済み（アコーディオン用）
             'dataStatistics': {
                 'totalEsCount': total_es_count,
                 'matchedEsCount': matched_es_count,
