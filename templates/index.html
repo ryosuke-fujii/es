@@ -145,16 +145,19 @@
                     <!-- 大学名 -->
                     <div class="mb-3">
                         <label for="university" class="form-label">
-                            大学名<span class="required">*</span>
+                            <i class="bi bi-mortarboard-fill"></i> 大学名<span class="required">*</span>
                         </label>
                         <input type="text" class="form-control" id="university" list="universities-list"
-                               required placeholder="大学名を入力">
+                               required placeholder="大学名を入力または選択">
                         <datalist id="universities-list"></datalist>
+                        <small class="text-muted">入力すると候補が表示されます</small>
                     </div>
 
                     <!-- 学部・学科 -->
                     <div class="mb-3">
-                        <label for="major" class="form-label">学部・学科</label>
+                        <label for="major" class="form-label">
+                            <i class="bi bi-book-fill"></i> 学部・学科
+                        </label>
                         <input type="text" class="form-control" id="major"
                                placeholder="例: 理工学部 情報工学科">
                     </div>
@@ -162,7 +165,7 @@
                     <!-- 卒業年度 -->
                     <div class="mb-3">
                         <label for="graduationYear" class="form-label">
-                            卒業年度<span class="required">*</span>
+                            <i class="bi bi-calendar-fill"></i> 卒業年度<span class="required">*</span>
                         </label>
                         <select class="form-select" id="graduationYear" required>
                             <option value="">選択してください</option>
@@ -176,7 +179,7 @@
                     <!-- 志望業界 -->
                     <div class="mb-3">
                         <label for="targetIndustry" class="form-label">
-                            志望業界<span class="required">*</span>
+                            <i class="bi bi-briefcase-fill"></i> 志望業界<span class="required">*</span>
                         </label>
                         <select class="form-select" id="targetIndustry" required>
                             <option value="">選択してください</option>
@@ -190,8 +193,9 @@
                             <i class="bi bi-trophy-fill text-warning"></i> 第一志望企業（任意）
                         </label>
                         <input type="text" class="form-control" id="targetCompany1"
-                               list="companies-list" placeholder="企業名を入力">
+                               list="companies-list" placeholder="企業名を入力または選択">
                         <datalist id="companies-list"></datalist>
+                        <small class="text-muted">入力すると候補が表示されます（データ件数も表示）</small>
                     </div>
 
                     <!-- 第二志望企業 -->
@@ -200,7 +204,8 @@
                             <i class="bi bi-trophy text-secondary"></i> 第二志望企業（任意）
                         </label>
                         <input type="text" class="form-control" id="targetCompany2"
-                               list="companies-list" placeholder="企業名を入力">
+                               list="companies-list" placeholder="企業名を入力または選択">
+                        <small class="text-muted">入力すると候補が表示されます（データ件数も表示）</small>
                     </div>
 
                     <!-- 第三志望企業 -->
@@ -209,13 +214,14 @@
                             <i class="bi bi-trophy" style="color: #cd7f32;"></i> 第三志望企業（任意）
                         </label>
                         <input type="text" class="form-control" id="targetCompany3"
-                               list="companies-list" placeholder="企業名を入力">
+                               list="companies-list" placeholder="企業名を入力または選択">
+                        <small class="text-muted">入力すると候補が表示されます（データ件数も表示）</small>
                     </div>
 
                     <!-- ES質問と回答 -->
                     <div class="mb-3">
                         <label class="form-label">
-                            ES質問と回答<span class="required">*</span>
+                            <i class="bi bi-pencil-square"></i> ES質問と回答<span class="required">*</span>
                         </label>
                         <div class="es-questions-area" id="es-questions-container">
                             <div class="es-question-item">
@@ -299,6 +305,9 @@
                         </h2>
                         <div class="row mb-3" id="industry-stats"></div>
                         <div class="alert alert-warning" id="recommendations"></div>
+
+                        <!-- 業界内の類似ES -->
+                        <div id="industry-similar-es-section" class="mt-4"></div>
                     </div>
                 </div>
 
@@ -692,6 +701,46 @@
                 <h5><i class="bi bi-lightbulb-fill"></i> 合格可能性を高める対策</h5>
                 <ul class="mb-0">${recommendationsHtml}</ul>
             `;
+
+            // 業界内の類似ES
+            if (data.industrySimilarESSamples && data.industrySimilarESSamples.length > 0) {
+                const industrySimilarESHtml = data.industrySimilarESSamples.map(sample => {
+                    const badgeClass = sample.result === '内定' ? 'badge-accepted' : 'badge-pass';
+                    const badgeText = sample.result === '内定' ? '内定' : '通過';
+
+                    const qaItemsHtml = sample.esContent.slice(0, 1).map(qa => `
+                        <div class="card mb-2">
+                            <div class="card-body">
+                                <h6 class="text-primary"><i class="bi bi-question-circle"></i> ${qa.question}</h6>
+                                <p class="card-text" style="white-space: pre-wrap;">${qa.answer}</p>
+                            </div>
+                        </div>
+                    `).join('');
+
+                    return `
+                        <div class="card es-sample-card mb-3">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <h6 class="card-title mb-0">${sample.company}</h6>
+                                    <span class="badge ${badgeClass}">${badgeText}</span>
+                                </div>
+                                <div class="alert alert-secondary py-2 mb-2">
+                                    <small>
+                                        <i class="bi bi-mortarboard"></i> ${sample.profile.university} |
+                                        <i class="bi bi-percent"></i> 類似度: ${sample.similarity}%
+                                    </small>
+                                </div>
+                                ${qaItemsHtml}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                document.getElementById('industry-similar-es-section').innerHTML = `
+                    <h5 class="text-primary mb-3"><i class="bi bi-file-earmark-text-fill"></i> 志望業界内の類似ES</h5>
+                    ${industrySimilarESHtml}
+                `;
+            }
 
             // ES分析
             const strengthsHtml = data.esAnalysis.strengths.map(s =>
