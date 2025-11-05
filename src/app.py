@@ -290,24 +290,109 @@ def load_csv_data(csv_path):
     tfidf_matrix = vectorizer.fit_transform(es_data['weighted_answer'])
     print(f"✅ ベクトル化完了: {tfidf_matrix.shape}")
 
+    # ============================================
     # セマンティックエンベディング生成（Sentence-BERT）
+    # ============================================
     print("🔧 セマンティックエンベディング生成中...")
     try:
         from sentence_transformers import SentenceTransformer
+        import time
 
+        # tqdmのインポート（進捗表示用）
+        try:
+            from tqdm import tqdm
+            has_tqdm = True
+        except ImportError:
+            print("  ⚠️ tqdmがインストールされていません。進捗表示なしで実行します。")
+            has_tqdm = False
+
+        # 1. モデルのロード
         if sentence_model is None:
-            sentence_model = SentenceTransformer('paraphrase-multilingual-mpnet-base-v2')
+            print("  📥 セマンティックモデルをダウンロード中...")
+            # 軽量モデルを使用（384次元、約2倍速い）
+            sentence_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
 
-        # バッチ処理で効率的にエンベディング生成
-        es_data['semantic_embedding'] = es_data['weighted_answer'].apply(
-            lambda x: sentence_model.encode(str(x)[:512], convert_to_tensor=False)  # 長さ制限
+            # GPU対応（利用可能な場合）
+            try:
+                import torch
+                device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                print(f"  🖥️  使用デバイス: {device}")
+                sentence_model = sentence_model.to(device)
+            except ImportError:
+                print("  🖥️  使用デバイス: cpu")
+
+            print("  ✅ モデルロード完了")
+
+        # 2. まず100件でテスト（所要時間の予測）
+        print("\n  🧪 テスト: 最初の100件を処理して所要時間を予測...")
+        test_start = time.time()
+        test_count = min(100, len(es_data))
+        test_texts = es_data['weighted_answer'].head(test_count).apply(lambda x: str(x)[:512]).tolist()
+        test_embeddings = sentence_model.encode(
+            test_texts,
+            convert_to_tensor=False,
+            show_progress_bar=False,
+            batch_size=32
         )
-        print(f"✅ セマンティックエンベディング完了")
+        test_time = time.time() - test_start
+
+        estimated_total_time = (test_time / test_count) * len(es_data)
+        print(f"  ⏱️  {test_count}件の処理時間: {test_time:.2f}秒")
+        print(f"  📊 予想所要時間: {estimated_total_time / 60:.1f}分")
+
+        # 3. 全データをバッチ処理
+        print(f"\n  🚀 全データのエンベディング生成中（{len(es_data)}件）...")
+
+        # テキストを一括で準備（長さ制限を512文字に）
+        all_texts = es_data['weighted_answer'].apply(lambda x: str(x)[:512]).tolist()
+
+        # バッチサイズの設定
+        batch_size = 32  # CPUの場合は16-32が最適
+        all_embeddings = []
+
+        # バッチ処理ループ
+        batch_range = range(0, len(all_texts), batch_size)
+        if has_tqdm:
+            batch_range = tqdm(batch_range, desc="  エンベディング生成")
+
+        for i in batch_range:
+            batch_texts = all_texts[i:i+batch_size]
+
+            # バッチで一気にエンコード
+            batch_embeddings = sentence_model.encode(
+                batch_texts,
+                convert_to_tensor=False,
+                show_progress_bar=False,
+                batch_size=batch_size
+            )
+
+            # リストに追加
+            if isinstance(batch_embeddings, list):
+                all_embeddings.extend(batch_embeddings)
+            else:
+                # numpyアレイの場合
+                all_embeddings.extend(batch_embeddings.tolist() if hasattr(batch_embeddings, 'tolist') else list(batch_embeddings))
+
+        # 4. DataFrameに格納
+        es_data['semantic_embedding'] = all_embeddings
+
+        # 5. 結果確認
+        print(f"\n  ✅ セマンティックエンベディング完了（{len(all_embeddings)}件）")
+        if len(all_embeddings) > 0:
+            first_embedding = all_embeddings[0]
+            if hasattr(first_embedding, '__len__'):
+                print(f"  📏 エンベディング次元: {len(first_embedding)}")
+
     except ImportError:
-        print("⚠️ sentence-transformersがインストールされていません。TF-IDFのみを使用します。")
+        print("⚠️ sentence-transformersがインストールされていません。")
+        print("   pip install sentence-transformers でインストールしてください。")
+        print("   TF-IDFのみを使用します。")
         es_data['semantic_embedding'] = None
+
     except Exception as e:
         print(f"⚠️ セマンティックエンベディング生成エラー: {e}")
+        import traceback
+        traceback.print_exc()
         es_data['semantic_embedding'] = None
 
     print("\n📊 データ統計:")
