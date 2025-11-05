@@ -4,15 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ES合格診断ツール</title>
+
+    <!-- Bootstrap CSS CDN -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
-            padding: 20px;
+            padding: 20px 0;
         }
-        .container {
+        .main-container {
             max-width: 1000px;
             margin: 0 auto;
             background: white;
@@ -20,54 +23,26 @@
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
             padding: 40px;
         }
-        h1 {
+        .page-title {
             text-align: center;
             color: #667eea;
             margin-bottom: 10px;
-            font-size: 32px;
+            font-size: 2rem;
+            font-weight: bold;
         }
-        .subtitle {
+        .page-subtitle {
             text-align: center;
-            color: #666;
+            color: #6c757d;
             margin-bottom: 30px;
         }
-        .form-group {
-            margin-bottom: 20px;
-        }
-        label {
-            display: block;
-            margin-bottom: 8px;
+        .form-label {
             font-weight: 600;
             color: #333;
         }
         .required {
-            color: #e74c3c;
-            margin-left: 4px;
+            color: #dc3545;
         }
-        input[type="text"], select, textarea {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 14px;
-            transition: border-color 0.3s;
-        }
-        input[type="text"]:focus, select:focus, textarea:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        textarea {
-            resize: vertical;
-            min-height: 100px;
-            font-family: inherit;
-        }
-        .char-count {
-            text-align: right;
-            font-size: 12px;
-            color: #999;
-            margin-top: 5px;
-        }
-        .es-questions {
+        .es-questions-area {
             border: 2px solid #e0e0e0;
             border-radius: 8px;
             padding: 20px;
@@ -83,350 +58,290 @@
             margin-bottom: 0;
             padding-bottom: 0;
         }
-        .add-question-btn {
-            background: #28a745;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 14px;
-            margin-top: 10px;
+        .char-count {
+            text-align: right;
+            font-size: 0.875rem;
+            color: #6c757d;
+            margin-top: 5px;
         }
-        .remove-question-btn {
-            background: #dc3545;
-            color: white;
-            border: none;
-            padding: 5px 15px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 12px;
-            float: right;
-        }
-        button {
-            width: 100%;
-            padding: 15px;
+        .btn-primary {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
             border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        .spinner-border {
+            width: 3rem;
+            height: 3rem;
+        }
+        .company-card {
+            border-left: 4px solid #667eea;
             transition: transform 0.2s;
         }
-        button:hover {
-            transform: translateY(-2px);
+        .company-card:hover {
+            transform: translateX(5px);
         }
-        .loading {
-            display: none;
-            text-align: center;
-            padding: 20px;
+        .match-score {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #667eea;
         }
-        .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 10px;
+        .es-sample-card {
+            border-left: 4px solid #28a745;
         }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #667eea;
         }
-        .results {
-            display: none;
+        .badge-pass {
+            background-color: #d4edda;
+            color: #155724;
         }
-        .result-card {
-            background: #f8f9fa;
+        .badge-accepted {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        .target-company-match {
+            background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+            border: 2px solid #667eea;
             border-radius: 12px;
             padding: 20px;
             margin-bottom: 20px;
         }
-        .result-card h2 {
-            color: #667eea;
-            margin-bottom: 15px;
-            font-size: 24px;
-        }
-        .company-item {
-            background: white;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 15px;
-            border-left: 4px solid #667eea;
-        }
-        .company-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-        .company-name {
-            font-size: 20px;
-            font-weight: 600;
-            color: #333;
-        }
-        .match-score {
-            font-size: 28px;
-            font-weight: 700;
-            color: #667eea;
-        }
-        .company-industry {
-            color: #666;
-            font-size: 14px;
-            margin-bottom: 10px;
-        }
-        .company-reason {
-            background: #e8eaf6;
-            padding: 10px;
-            border-radius: 6px;
-            color: #333;
-            font-size: 14px;
-        }
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-        .stat-card {
-            background: white;
+        .target-company-item {
             padding: 15px;
             border-radius: 8px;
-            text-align: center;
-        }
-        .stat-value {
-            font-size: 32px;
-            font-weight: 700;
-            color: #667eea;
-        }
-        .stat-label {
-            color: #666;
-            font-size: 14px;
-            margin-top: 5px;
-        }
-        .recommendations {
-            background: #fff3cd;
-            border-left: 4px solid #ffc107;
-            padding: 15px;
-            border-radius: 8px;
-        }
-        .recommendations h3 {
-            color: #856404;
             margin-bottom: 10px;
         }
-        .recommendations ul {
-            list-style: none;
-            padding-left: 0;
+        .target-company-item.first-choice {
+            background: linear-gradient(135deg, #ffd70015 0%, #ffa50015 100%);
+            border-left: 4px solid #ffa500;
         }
-        .recommendations li {
-            padding: 5px 0;
-            color: #856404;
+        .target-company-item.second-choice {
+            background: linear-gradient(135deg, #c0c0c015 0%, #80808015 100%);
+            border-left: 4px solid #c0c0c0;
         }
-        .recommendations li:before {
-            content: "✓ ";
-            font-weight: bold;
+        .target-company-item.third-choice {
+            background: linear-gradient(135deg, #cd7f3215 0%, #8b451315 100%);
+            border-left: 4px solid #cd7f32;
         }
-        .analysis-section {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-        }
-        .analysis-box {
-            background: white;
-            padding: 15px;
-            border-radius: 8px;
-        }
-        .analysis-box h4 {
-            color: #667eea;
-            margin-bottom: 10px;
-        }
-        .analysis-box ul {
-            list-style: none;
-            padding-left: 0;
-        }
-        .analysis-box li {
-            padding: 5px 0;
-            font-size: 14px;
-        }
-        .strength:before {
-            content: "✓ ";
-            color: #4caf50;
-            font-weight: bold;
-        }
-        .improvement:before {
-            content: "⚠ ";
-            color: #ff9800;
-            font-weight: bold;
-        }
-        .reset-btn {
-            background: #6c757d;
-            margin-top: 20px;
-        }
-        .es-sample-card {
-            background: white;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 20px;
-            border-left: 4px solid #4caf50;
-        }
-        .es-sample-header {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 15px;
-            padding-bottom: 15px;
-            border-bottom: 2px solid #e0e0e0;
-        }
-        .es-sample-company {
-            font-size: 18px;
-            font-weight: 600;
-            color: #333;
-        }
-        .badge {
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 600;
-        }
-        .badge-pass {
-            background: #e8f5e9;
-            color: #2e7d32;
-        }
-        .badge-accepted {
-            background: #fff3cd;
-            color: #856404;
-        }
-        .es-profile {
-            background: #f8f9fa;
-            padding: 12px;
-            border-radius: 6px;
-            margin-bottom: 15px;
-        }
-        .es-qa-item {
-            margin-bottom: 15px;
-            padding: 15px;
-            background: #fafafa;
-            border-radius: 6px;
-        }
-        .es-question {
-            font-weight: 600;
-            color: #667eea;
-            margin-bottom: 10px;
-        }
-        .es-answer {
-            color: #333;
-            line-height: 1.6;
-            white-space: pre-wrap;
+        select option {
+            padding-right: 10px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🎯 ES合格診断ツール</h1>
-        <p class="subtitle">3.5万件のデータから精密分析</p>
+        <div class="main-container">
+            <h1 class="page-title"><i class="bi bi-bullseye"></i> ES合格診断ツール</h1>
+            <p class="page-subtitle">3.5万件のデータから精密分析</p>
 
-        <div id="form-section">
-            <form id="diagnosis-form">
-                <div class="form-group">
-                    <label>大学名<span class="required">*</span></label>
-                    <input type="text" id="university" list="universities-list" required placeholder="大学名を入力">
-                    <datalist id="universities-list"></datalist>
+            <!-- フォームセクション -->
+            <div id="form-section">
+                <form id="diagnosis-form">
+                    <!-- 大学名 -->
+                    <div class="mb-3">
+                        <label for="university" class="form-label">
+                            大学名<span class="required">*</span>
+                        </label>
+                        <input type="text" class="form-control" id="university" list="universities-list"
+                               required placeholder="大学名を入力">
+                        <datalist id="universities-list"></datalist>
+                    </div>
+
+                    <!-- 学部・学科 -->
+                    <div class="mb-3">
+                        <label for="major" class="form-label">学部・学科</label>
+                        <input type="text" class="form-control" id="major"
+                               placeholder="例: 理工学部 情報工学科">
+                    </div>
+
+                    <!-- 卒業年度 -->
+                    <div class="mb-3">
+                        <label for="graduationYear" class="form-label">
+                            卒業年度<span class="required">*</span>
+                        </label>
+                        <select class="form-select" id="graduationYear" required>
+                            <option value="">選択してください</option>
+                            <option value="25">25卒</option>
+                            <option value="26">26卒</option>
+                            <option value="27">27卒</option>
+                            <option value="28">28卒</option>
+                        </select>
+                    </div>
+
+                    <!-- 志望業界 -->
+                    <div class="mb-3">
+                        <label for="targetIndustry" class="form-label">
+                            志望業界<span class="required">*</span>
+                        </label>
+                        <select class="form-select" id="targetIndustry" required>
+                            <option value="">選択してください</option>
+                        </select>
+                        <small class="text-muted" id="industry-count"></small>
+                    </div>
+
+                    <!-- 第一志望企業 -->
+                    <div class="mb-3">
+                        <label for="targetCompany1" class="form-label">
+                            <i class="bi bi-trophy-fill text-warning"></i> 第一志望企業（任意）
+                        </label>
+                        <input type="text" class="form-control" id="targetCompany1"
+                               list="companies-list" placeholder="企業名を入力">
+                        <datalist id="companies-list"></datalist>
+                    </div>
+
+                    <!-- 第二志望企業 -->
+                    <div class="mb-3">
+                        <label for="targetCompany2" class="form-label">
+                            <i class="bi bi-trophy text-secondary"></i> 第二志望企業（任意）
+                        </label>
+                        <input type="text" class="form-control" id="targetCompany2"
+                               list="companies-list" placeholder="企業名を入力">
+                    </div>
+
+                    <!-- 第三志望企業 -->
+                    <div class="mb-3">
+                        <label for="targetCompany3" class="form-label">
+                            <i class="bi bi-trophy" style="color: #cd7f32;"></i> 第三志望企業（任意）
+                        </label>
+                        <input type="text" class="form-control" id="targetCompany3"
+                               list="companies-list" placeholder="企業名を入力">
+                    </div>
+
+                    <!-- ES質問と回答 -->
+                    <div class="mb-3">
+                        <label class="form-label">
+                            ES質問と回答<span class="required">*</span>
+                        </label>
+                        <div class="es-questions-area" id="es-questions-container">
+                            <div class="es-question-item">
+                                <label class="form-label">質問1</label>
+                                <select class="form-select es-question-select mb-2" required>
+                                    <option value="">選択してください</option>
+                                </select>
+                                <textarea class="form-control es-answer" rows="4" required
+                                          placeholder="回答を入力してください（100文字以上推奨）"></textarea>
+                                <div class="char-count"><span class="answer-count">0</span>文字</div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-success btn-sm mt-2" onclick="addQuestion()">
+                            <i class="bi bi-plus-circle"></i> 質問を追加
+                        </button>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary btn-lg w-100" id="submit-btn">
+                        <i class="bi bi-search"></i> 診断を開始する
+                    </button>
+                </form>
+            </div>
+
+            <!-- ローディングセクション -->
+            <div id="loading" class="text-center d-none py-5">
+                <div class="spinner-border text-primary mb-3" role="status">
+                    <span class="visually-hidden">Loading...</span>
                 </div>
+                <p>診断中です。しばらくお待ちください...</p>
+            </div>
 
-                <div class="form-group">
-                    <label>学部・学科</label>
-                    <input type="text" id="major" placeholder="例: 理工学部 情報工学科">
-                </div>
-
-                <div class="form-group">
-                    <label>卒業年度<span class="required">*</span></label>
-                    <select id="graduationYear" required>
-                        <option value="">選択してください</option>
-                        <option value="25">25卒</option>
-                        <option value="26">26卒</option>
-                        <option value="27">27卒</option>
-                        <option value="28">28卒</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label>志望業界<span class="required">*</span></label>
-                    <select id="targetIndustry" required>
-                        <option value="">選択してください</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label>第一志望企業（任意）</label>
-                    <input type="text" id="targetCompany" list="companies-list" placeholder="企業名を入力">
-                    <datalist id="companies-list"></datalist>
-                </div>
-
-                <div class="form-group">
-                    <label>ES質問と回答<span class="required">*</span></label>
-                    <div class="es-questions" id="es-questions-container">
-                        <div class="es-question-item">
-                            <label>質問1</label>
-                            <select class="es-question-select" required>
-                                <option value="">選択してください</option>
-                            </select>
-                            <textarea class="es-answer" required placeholder="回答を入力してください（100文字以上推奨）"></textarea>
-                            <div class="char-count"><span class="answer-count">0</span>文字</div>
+            <!-- 結果セクション -->
+            <div id="results" class="d-none">
+                <!-- 志望企業のマッチ率 -->
+                <div id="target-companies-section" class="d-none">
+                    <div class="card mb-4">
+                        <div class="card-body">
+                            <h2 class="card-title h4 text-primary mb-3">
+                                <i class="bi bi-heart-fill"></i> 志望企業とのマッチ率
+                            </h2>
+                            <div id="target-companies-result"></div>
                         </div>
                     </div>
-                    <button type="button" class="add-question-btn" onclick="addQuestion()">+ 質問を追加</button>
                 </div>
 
-                <button type="submit" id="submit-btn">診断を開始する</button>
-            </form>
-        </div>
-
-        <div class="loading" id="loading">
-            <div class="spinner"></div>
-            <p>診断中です。しばらくお待ちください...</p>
-        </div>
-
-        <div class="results" id="results">
-            <div class="result-card">
-                <h2>📊 診断結果サマリー</h2>
-                <div class="stats-grid" id="summary-stats"></div>
-            </div>
-
-            <div class="result-card">
-                <h2>🏢 あなたが受かりやすい企業 TOP5</h2>
-                <div id="companies-result"></div>
-            </div>
-
-            <div class="result-card">
-                <h2>📝 類似する合格ES</h2>
-                <div id="similar-es-list"></div>
-            </div>
-
-            <div class="result-card">
-                <h2>📈 業界分析</h2>
-                <div class="stats-grid" id="industry-stats"></div>
-                <div class="recommendations" id="recommendations"></div>
-            </div>
-
-            <div class="result-card">
-                <h2>✍️ ES分析</h2>
-                <div class="analysis-section">
-                    <div class="analysis-box">
-                        <h4>良い点</h4>
-                        <ul id="strengths-list"></ul>
-                    </div>
-                    <div class="analysis-box">
-                        <h4>改善ポイント</h4>
-                        <ul id="improvements-list"></ul>
+                <!-- サマリー統計 -->
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h2 class="card-title h4 text-primary mb-3">
+                            <i class="bi bi-bar-chart-fill"></i> 診断結果サマリー
+                        </h2>
+                        <div class="row" id="summary-stats"></div>
                     </div>
                 </div>
-            </div>
 
-            <button class="reset-btn" onclick="resetForm()">もう一度診断する</button>
+                <!-- TOP5企業 -->
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h2 class="card-title h4 text-primary mb-3">
+                            <i class="bi bi-building"></i> あなたが受かりやすい企業 TOP5
+                        </h2>
+                        <div id="companies-result"></div>
+                    </div>
+                </div>
+
+                <!-- 類似ES -->
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h2 class="card-title h4 text-primary mb-3">
+                            <i class="bi bi-file-earmark-text"></i> 類似する合格ES
+                        </h2>
+                        <div id="similar-es-list"></div>
+                    </div>
+                </div>
+
+                <!-- 業界分析 -->
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h2 class="card-title h4 text-primary mb-3">
+                            <i class="bi bi-graph-up"></i> 業界分析
+                        </h2>
+                        <div class="row mb-3" id="industry-stats"></div>
+                        <div class="alert alert-warning" id="recommendations"></div>
+                    </div>
+                </div>
+
+                <!-- ES分析 -->
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h2 class="card-title h4 text-primary mb-3">
+                            <i class="bi bi-pencil-square"></i> ES分析
+                        </h2>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="card bg-light">
+                                    <div class="card-body">
+                                        <h5 class="card-title text-success">
+                                            <i class="bi bi-check-circle"></i> 良い点
+                                        </h5>
+                                        <ul id="strengths-list" class="list-unstyled"></ul>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card bg-light">
+                                    <div class="card-body">
+                                        <h5 class="card-title text-warning">
+                                            <i class="bi bi-exclamation-triangle"></i> 改善ポイント
+                                        </h5>
+                                        <ul id="improvements-list" class="list-unstyled"></ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <button class="btn btn-secondary w-100" onclick="resetForm()">
+                    <i class="bi bi-arrow-counterclockwise"></i> もう一度診断する
+                </button>
+            </div>
         </div>
     </div>
+
+    <!-- Bootstrap JS CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
         let questionCount = 1;
@@ -434,6 +349,8 @@
         let industries = [];
         let companies = [];
         let commonQuestions = [];
+        let companyCounts = {};
+        let industryCounts = {};
 
         function initializeSelects() {
             console.log('📋 選択肢を初期化中...');
@@ -451,6 +368,8 @@
                 industries = window.EMBEDDED_DATA.industries || [];
                 companies = window.EMBEDDED_DATA.companies || [];
                 commonQuestions = window.EMBEDDED_DATA.commonQuestions || [];
+                companyCounts = window.EMBEDDED_DATA.companyCounts || {};
+                industryCounts = window.EMBEDDED_DATA.industryCounts || {};
 
                 console.log(`✅ データ取得完了: 大学${universities.length}校, 業界${industries.length}種類, 企業${companies.length}社`);
 
@@ -462,20 +381,23 @@
                     universitiesList.appendChild(option);
                 });
 
-                // 業界のselect
+                // 業界のselect（データ数付き）
                 const industrySelect = document.getElementById('targetIndustry');
                 industries.forEach(ind => {
                     const option = document.createElement('option');
                     option.value = ind;
-                    option.textContent = ind;
+                    const count = industryCounts[ind] || 0;
+                    option.textContent = `${ind} (${count}件)`;
                     industrySelect.appendChild(option);
                 });
 
-                // 企業名のdatalist
+                // 企業名のdatalist（データ数付き）
                 const companiesList = document.getElementById('companies-list');
                 companies.forEach(comp => {
                     const option = document.createElement('option');
+                    const count = companyCounts[comp] || 0;
                     option.value = comp;
+                    option.textContent = `${comp} (${count}件)`;
                     companiesList.appendChild(option);
                 });
 
@@ -512,12 +434,16 @@
             const newQuestion = document.createElement('div');
             newQuestion.className = 'es-question-item';
             newQuestion.innerHTML = `
-                <button type="button" class="remove-question-btn" onclick="removeQuestion(this)">削除</button>
-                <label>質問${questionCount}</label>
-                <select class="es-question-select" required>
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <label class="form-label mb-0">質問${questionCount}</label>
+                    <button type="button" class="btn btn-danger btn-sm" onclick="removeQuestion(this)">
+                        <i class="bi bi-trash"></i> 削除
+                    </button>
+                </div>
+                <select class="form-select es-question-select mb-2" required>
                     <option value="">選択してください</option>
                 </select>
-                <textarea class="es-answer" required placeholder="回答を入力してください"></textarea>
+                <textarea class="form-control es-answer" rows="4" required placeholder="回答を入力してください"></textarea>
                 <div class="char-count"><span class="answer-count">0</span>文字</div>
             `;
             container.appendChild(newQuestion);
@@ -530,7 +456,7 @@
         }
 
         function removeQuestion(btn) {
-            btn.parentElement.remove();
+            btn.closest('.es-question-item').remove();
             questionCount--;
         }
 
@@ -567,13 +493,17 @@
                 major: document.getElementById('major').value,
                 graduationYear: document.getElementById('graduationYear').value,
                 targetIndustry: document.getElementById('targetIndustry').value,
-                targetCompany: document.getElementById('targetCompany').value,
+                targetCompanies: [
+                    document.getElementById('targetCompany1').value,
+                    document.getElementById('targetCompany2').value,
+                    document.getElementById('targetCompany3').value
+                ].filter(c => c && c.trim() !== ''),
                 esQuestions: esQuestions,
                 esAnswers: esAnswers
             };
 
-            document.getElementById('form-section').style.display = 'none';
-            document.getElementById('loading').style.display = 'block';
+            document.getElementById('form-section').classList.add('d-none');
+            document.getElementById('loading').classList.remove('d-none');
 
             try {
                 const response = await fetch('/analyze', {
@@ -591,8 +521,8 @@
                 displayResults(result);
             } catch (error) {
                 alert('エラー: ' + error.message);
-                document.getElementById('form-section').style.display = 'block';
-                document.getElementById('loading').style.display = 'none';
+                document.getElementById('form-section').classList.remove('d-none');
+                document.getElementById('loading').classList.add('d-none');
             }
         });
 
@@ -602,116 +532,197 @@
             if (!data.matchCompanies || data.matchCompanies.length === 0) {
                 console.error('❌ matchCompaniesが空です');
                 alert('マッチする企業が見つかりませんでした');
-                document.getElementById('form-section').style.display = 'block';
-                document.getElementById('loading').style.display = 'none';
+                document.getElementById('form-section').classList.remove('d-none');
+                document.getElementById('loading').classList.add('d-none');
                 return;
             }
 
             console.log(`✅ ${data.matchCompanies.length}社の企業データを受信`);
 
+            // 志望企業のマッチ率表示
+            if (data.targetCompaniesMatch && data.targetCompaniesMatch.length > 0) {
+                document.getElementById('target-companies-section').classList.remove('d-none');
+
+                const targetCompaniesHtml = data.targetCompaniesMatch.map((target, index) => {
+                    const choiceClass = index === 0 ? 'first-choice' : (index === 1 ? 'second-choice' : 'third-choice');
+                    const choiceIcon = index === 0 ? '<i class="bi bi-trophy-fill text-warning"></i>' :
+                                      (index === 1 ? '<i class="bi bi-trophy text-secondary"></i>' :
+                                       '<i class="bi bi-trophy" style="color: #cd7f32;"></i>');
+                    const choiceLabel = index === 0 ? '第一志望' : (index === 1 ? '第二志望' : '第三志望');
+
+                    return `
+                        <div class="target-company-item ${choiceClass}">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h5 class="mb-1">${choiceIcon} ${choiceLabel}: ${target.name}</h5>
+                                    <small class="text-muted">${target.industry || '業界不明'}</small>
+                                </div>
+                                <div class="text-end">
+                                    <div class="match-score">${target.matchScore}%</div>
+                                    <small class="text-muted">マッチ率</small>
+                                </div>
+                            </div>
+                            ${target.reason ? `<div class="mt-2"><small><i class="bi bi-info-circle"></i> ${target.reason}</small></div>` : ''}
+                        </div>
+                    `;
+                }).join('');
+
+                document.getElementById('target-companies-result').innerHTML = targetCompaniesHtml;
+            }
+
+            // サマリー統計
             const topCompany = data.matchCompanies[0];
             document.getElementById('summary-stats').innerHTML = `
-                <div class="stat-card">
-                    <div class="stat-value">${topCompany.matchScore}%</div>
-                    <div class="stat-label">最高マッチ度</div>
+                <div class="col-md-4">
+                    <div class="card text-center">
+                        <div class="card-body">
+                            <div class="stat-value">${topCompany.matchScore}%</div>
+                            <div class="text-muted">最高マッチ度</div>
+                        </div>
+                    </div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-value">${data.industryAnalysis.passRate}%</div>
-                    <div class="stat-label">業界合格率</div>
+                <div class="col-md-4">
+                    <div class="card text-center">
+                        <div class="card-body">
+                            <div class="stat-value">${data.industryAnalysis.passRate}%</div>
+                            <div class="text-muted">業界合格率</div>
+                        </div>
+                    </div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-value">${data.matchCompanies.length}</div>
-                    <div class="stat-label">マッチ企業数</div>
+                <div class="col-md-4">
+                    <div class="card text-center">
+                        <div class="card-body">
+                            <div class="stat-value">${data.matchCompanies.length}</div>
+                            <div class="text-muted">マッチ企業数</div>
+                        </div>
+                    </div>
                 </div>
             `;
 
+            // TOP5企業
             const companiesHtml = data.matchCompanies.map((company, index) => `
-                <div class="company-item">
-                    <div class="company-header">
-                        <div>
-                            <div class="company-name">#${index + 1} ${company.name}</div>
-                            <div class="company-industry">${company.industry}</div>
+                <div class="card company-card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <h5 class="card-title">#${index + 1} ${company.name}</h5>
+                                <p class="card-text text-muted mb-2">${company.industry}</p>
+                                <div class="alert alert-info mb-0 py-2">
+                                    <small><i class="bi bi-lightbulb"></i> ${company.reason}</small>
+                                </div>
+                            </div>
+                            <div class="text-end ms-3">
+                                <div class="match-score">${company.matchScore}%</div>
+                            </div>
                         </div>
-                        <div class="match-score">${company.matchScore}%</div>
                     </div>
-                    <div class="company-reason">${company.reason}</div>
                 </div>
             `).join('');
-
             document.getElementById('companies-result').innerHTML = companiesHtml;
 
+            // 類似ES
             if (data.similarESSamples && data.similarESSamples.length > 0) {
                 const similarESHtml = data.similarESSamples.map(sample => {
-                    const resultBadge = sample.result === '内定' ?
-                        '<span class="badge badge-accepted">内定</span>' :
-                        '<span class="badge badge-pass">通過</span>';
+                    const badgeClass = sample.result === '内定' ? 'badge-accepted' : 'badge-pass';
+                    const badgeText = sample.result === '内定' ? '内定' : '通過';
 
                     const qaItemsHtml = sample.esContent.map(qa => `
-                        <div class="es-qa-item">
-                            <div class="es-question">Q. ${qa.question}</div>
-                            <div class="es-answer">${qa.answer}</div>
+                        <div class="card mb-2">
+                            <div class="card-body">
+                                <h6 class="text-primary"><i class="bi bi-question-circle"></i> ${qa.question}</h6>
+                                <p class="card-text" style="white-space: pre-wrap;">${qa.answer}</p>
+                            </div>
                         </div>
                     `).join('');
 
                     return `
-                        <div class="es-sample-card">
-                            <div class="es-sample-header">
-                                <div class="es-sample-company">${sample.company}</div>
-                                ${resultBadge}
+                        <div class="card es-sample-card mb-3">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h5 class="card-title mb-0">${sample.company}</h5>
+                                    <span class="badge ${badgeClass}">${badgeText}</span>
+                                </div>
+                                <div class="alert alert-secondary py-2 mb-3">
+                                    <small>
+                                        <i class="bi bi-mortarboard"></i> ${sample.profile.university} |
+                                        <i class="bi bi-book"></i> ${sample.profile.major} |
+                                        <i class="bi bi-calendar"></i> ${sample.profile.gradYear}
+                                    </small>
+                                </div>
+                                ${qaItemsHtml}
                             </div>
-                            <div class="es-profile">
-                                🎓 ${sample.profile.university} | 📚 ${sample.profile.major} | 📅 ${sample.profile.gradYear}
-                            </div>
-                            ${qaItemsHtml}
                         </div>
                     `;
                 }).join('');
                 document.getElementById('similar-es-list').innerHTML = similarESHtml;
             }
 
+            // 業界分析
             document.getElementById('industry-stats').innerHTML = `
-                <div class="stat-card">
-                    <div class="stat-value">${data.industryAnalysis.passRate}%</div>
-                    <div class="stat-label">合格率</div>
+                <div class="col-md-4">
+                    <div class="card text-center">
+                        <div class="card-body">
+                            <div class="stat-value">${data.industryAnalysis.passRate}%</div>
+                            <div class="text-muted">合格率</div>
+                        </div>
+                    </div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-value">${data.industryAnalysis.avgApplicants}</div>
-                    <div class="stat-label">平均応募者数</div>
+                <div class="col-md-4">
+                    <div class="card text-center">
+                        <div class="card-body">
+                            <div class="stat-value">${data.industryAnalysis.avgApplicants}</div>
+                            <div class="text-muted">平均応募者数</div>
+                        </div>
+                    </div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-value">${data.industryAnalysis.competition}</div>
-                    <div class="stat-label">競争率</div>
+                <div class="col-md-4">
+                    <div class="card text-center">
+                        <div class="card-body">
+                            <div class="stat-value">${data.industryAnalysis.competition}</div>
+                            <div class="text-muted">競争率</div>
+                        </div>
+                    </div>
                 </div>
             `;
 
-            const recommendationsHtml = data.industryAnalysis.recommendations.map(rec => `<li>${rec}</li>`).join('');
+            const recommendationsHtml = data.industryAnalysis.recommendations.map(rec =>
+                `<li><i class="bi bi-check2"></i> ${rec}</li>`
+            ).join('');
             document.getElementById('recommendations').innerHTML = `
-                <h3>合格可能性を高める対策</h3>
-                <ul>${recommendationsHtml}</ul>
+                <h5><i class="bi bi-lightbulb-fill"></i> 合格可能性を高める対策</h5>
+                <ul class="mb-0">${recommendationsHtml}</ul>
             `;
 
-            const strengthsHtml = data.esAnalysis.strengths.map(s => `<li class="strength">${s}</li>`).join('');
+            // ES分析
+            const strengthsHtml = data.esAnalysis.strengths.map(s =>
+                `<li class="mb-2"><i class="bi bi-check-circle-fill text-success"></i> ${s}</li>`
+            ).join('');
             document.getElementById('strengths-list').innerHTML = strengthsHtml;
 
-            const improvementsHtml = data.esAnalysis.improvements.map(i => `<li class="improvement">${i}</li>`).join('');
+            const improvementsHtml = data.esAnalysis.improvements.map(i =>
+                `<li class="mb-2"><i class="bi bi-exclamation-triangle-fill text-warning"></i> ${i}</li>`
+            ).join('');
             document.getElementById('improvements-list').innerHTML = improvementsHtml;
 
-            document.getElementById('loading').style.display = 'none';
-            document.getElementById('results').style.display = 'block';
+            document.getElementById('loading').classList.add('d-none');
+            document.getElementById('results').classList.remove('d-none');
             document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
         }
 
         function resetForm() {
             document.getElementById('diagnosis-form').reset();
             document.querySelectorAll('.answer-count').forEach(span => span.textContent = '0');
-            document.getElementById('results').style.display = 'none';
-            document.getElementById('form-section').style.display = 'block';
+            document.getElementById('results').classList.add('d-none');
+            document.getElementById('target-companies-section').classList.add('d-none');
+            document.getElementById('form-section').classList.remove('d-none');
 
             const container = document.getElementById('es-questions-container');
             while (container.children.length > 1) {
                 container.removeChild(container.lastChild);
             }
             questionCount = 1;
+
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
         if (document.readyState === 'loading') {

@@ -22,6 +22,8 @@ universities_list = []
 industries_list = []
 companies_list = []
 common_questions = []
+company_counts = {}
+industry_counts = {}
 
 # Flaskアプリケーションの初期化
 # templatesフォルダを親ディレクトリから読み込む
@@ -120,6 +122,7 @@ def load_csv_data(csv_path):
 
     # 選択肢を抽出
     global universities_list, industries_list, companies_list, common_questions
+    global company_counts, industry_counts
 
     print("\n📋 選択肢を抽出中...")
 
@@ -131,6 +134,12 @@ def load_csv_data(csv_path):
 
     companies_list = sorted(es_data['company_name'].dropna().unique().tolist())
     companies_list = [c for c in companies_list if c and str(c).strip() != ""]
+
+    # 企業ごとのデータ件数をカウント
+    company_counts = es_data['company_name'].value_counts().to_dict()
+
+    # 業界ごとのデータ件数をカウント
+    industry_counts = es_data['industry'].value_counts().to_dict()
 
     common_questions = [
         "学生時代に力を入れたこと（ガクチカ）",
@@ -256,6 +265,64 @@ def get_top_companies(similar_es, user_industry, user_university="", top_n=5):
             break
 
     return companies
+
+def calculate_target_company_match(company_name, similar_es, user_industry, user_university=""):
+    """特定の志望企業とのマッチ率を計算"""
+    # 企業データを検索
+    company_data = es_data[es_data['company_name'] == company_name]
+
+    if len(company_data) == 0:
+        # データがない場合は、類似ESの平均スコアを使用
+        if len(similar_es) > 0:
+            avg_score = similar_es['similarity_score'].mean()
+            return {
+                'name': company_name,
+                'industry': '不明',
+                'matchScore': min(int(avg_score * 70), 100),  # 控えめなスコア
+                'reason': 'データ不足のため推定値です'
+            }
+        return None
+
+    # 企業の代表的なデータを取得
+    representative = company_data.iloc[0]
+
+    # 類似度を計算（その企業のESとの平均類似度）
+    company_similarities = similar_es[similar_es['company_name'] == company_name]
+
+    if len(company_similarities) > 0:
+        avg_similarity = company_similarities['similarity_score'].mean()
+    else:
+        avg_similarity = similar_es['similarity_score'].mean() * 0.7  # 控えめに推定
+
+    difficulty = estimate_company_difficulty(representative)
+    industry_match = 1.0 if user_industry in str(representative['industry']) else 0.5
+    university_match = 1.0 if user_university and user_university == representative.get('university') else 0.5
+
+    match_score = calculate_match_score(
+        avg_similarity,
+        difficulty,
+        industry_match,
+        university_match
+    )
+
+    reasons = []
+    if avg_similarity > 0.3:
+        reasons.append('ESの内容が類似')
+    if industry_match == 1.0:
+        reasons.append('志望業界と一致')
+    if university_match == 1.0:
+        reasons.append('同じ大学からの採用実績')
+    if len(company_data) >= 10:
+        reasons.append(f'{len(company_data)}件の合格ES実績あり')
+
+    reason = '、'.join(reasons) if reasons else 'データマッチング'
+
+    return {
+        'name': company_name,
+        'industry': str(representative['industry']) if not pd.isna(representative['industry']) else '不明',
+        'matchScore': match_score,
+        'reason': reason
+    }
 
 def analyze_industry(industry):
     """業界分析"""
@@ -421,7 +488,9 @@ def home():
         'universities': universities_list[:200],  # 最初の200校
         'industries': industries_list,
         'companies': companies_list[:300],  # 最初の300社
-        'commonQuestions': common_questions
+        'commonQuestions': common_questions,
+        'companyCounts': {k: v for k, v in company_counts.items() if k in companies_list[:300]},
+        'industryCounts': industry_counts
     }
 
     # JSONシリアライズ（ensure_ascii=Trueで安全に）
@@ -478,12 +547,26 @@ def analyze_es():
         es_analysis = analyze_es_answers(data['esAnswers'])
         similar_es_samples = get_similar_es_samples(similar_es, top_n=3)
 
+        # 志望企業のマッチ率を計算（第三志望まで）
+        target_companies_match = []
+        if data.get('targetCompanies') and len(data['targetCompanies']) > 0:
+            for target_company in data['targetCompanies']:
+                if target_company and target_company.strip():
+                    match_result = calculate_target_company_match(
+                        target_company,
+                        similar_es,
+                        data['targetIndustry'],
+                        data.get('university', '')
+                    )
+                    if match_result:
+                        target_companies_match.append(match_result)
+
         response = {
             'matchCompanies': top_companies,
             'industryAnalysis': industry_analysis,
             'esAnalysis': es_analysis,
             'similarESSamples': similar_es_samples,
-            'targetCompany': data.get('targetCompany'),
+            'targetCompaniesMatch': target_companies_match,  # 第三志望までのマッチ率
             'userInfo': {
                 'university': data.get('university'),
                 'major': data.get('major'),
