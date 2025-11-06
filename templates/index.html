@@ -605,9 +605,11 @@
 
             // 志望企業のマッチ率表示
             if (data.targetCompaniesMatch && data.targetCompaniesMatch.length > 0) {
+                console.log('📍 志望企業のマッチ率データ:', data.targetCompaniesMatch);
                 document.getElementById('target-companies-section').classList.remove('d-none');
 
                 const targetCompaniesHtml = data.targetCompaniesMatch.map((target, index) => {
+                    console.log(`  企業${index + 1}: ${target.name}, esSamples:`, target.esSamples);
                     const choiceClass = index === 0 ? 'first-choice' : (index === 1 ? 'second-choice' : 'third-choice');
                     const choiceIcon = index === 0 ? '<i class="bi bi-trophy-fill text-warning"></i>' :
                                       (index === 1 ? '<i class="bi bi-trophy text-secondary"></i>' :
@@ -657,6 +659,15 @@
                                 </button>
                                 <div class="collapse mt-3" id="target-es-${index}">
                                     ${samplesContent}
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        console.warn(`  ⚠️ ${target.name} のesSamplesが空です`);
+                        esSamplesHtml = `
+                            <div class="mt-3">
+                                <div class="alert alert-info py-2">
+                                    <small><i class="bi bi-info-circle"></i> この企業のESサンプルは現在ありません</small>
                                 </div>
                             </div>
                         `;
