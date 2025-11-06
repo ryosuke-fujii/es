@@ -1263,7 +1263,11 @@ def load_csv_data(csv_path):
     print(f"  - 企業: {len(companies_list)}社")
 
 def calculate_similarity(input_text, top_n=100):
-    """類似度計算（ハイブリッド：TF-IDF + セマンティック + 構造分析 + テーマフィルタリング + 成果・詳細度）"""
+    """類似度計算（修正版：100%を超えないように調整）
+
+    ハイブリッド方式：TF-IDF + セマンティック + 構造分析 + テーマフィルタリング + 成果・詳細度
+    ボーナススコアは加算式で適用し、最終スコアは0.0〜1.0の範囲に制限
+    """
     # 入力テキストにも同じ重み付けを適用
     weighted_input = extract_theme_keywords_for_weighting(input_text)
 
@@ -1333,94 +1337,77 @@ def calculate_similarity(input_text, top_n=100):
     input_themes = categorize_es_themes(input_text)
     input_theme_names = set([t['theme'] for t in input_themes[:3]])  # 上位3テーマ
 
-    # テーマボーナスを追加
-    for idx, row in result.iterrows():
-        es_themes = row['themes']
-        es_theme_names = set([t['theme'] for t in es_themes[:3]])
-
-        # テーマの一致数を計算
-        theme_overlap = len(input_theme_names & es_theme_names)
-
-        # ボーナススコア（0〜0.15）
-        # 3つ一致 → +15%、2つ一致 → +10%、1つ一致 → +5%
-        theme_bonus = theme_overlap * 0.05
-
-        # スコアを更新（乗算）
-        result.at[idx, 'similarity_score'] = (
-            row['similarity_score'] * (1 + theme_bonus)
-        )
-
-    # ============================================
-    # ✅ 新規追加: 定量的成果の重み付け
-    # ============================================
-
-    print("  🔢 定量的成果スコアを計算中...")
-
-    # 入力ESの成果スコア
+    # 入力ESの特徴を事前計算
     input_achievement = extract_quantitative_achievement_score(input_text)
-
-    for idx, row in result.iterrows():
-        es_achievement = extract_quantitative_achievement_score(row['combined_answer'])
-
-        # 成果レベルの類似度を計算
-        if input_achievement > 0.4 and es_achievement > 0.4:
-            # 両方とも定量的成果が強い（高レベル）→ 大きなボーナス
-            achievement_bonus = 0.20
-        elif input_achievement > 0.2 and es_achievement > 0.2:
-            # 両方とも定量的成果がある（中レベル）→ 中ボーナス
-            achievement_bonus = 0.12
-        elif abs(input_achievement - es_achievement) < 0.15:
-            # 成果レベルが近い → 小ボーナス
-            achievement_bonus = 0.08
-        elif (input_achievement > 0.3 and es_achievement < 0.1) or \
-             (input_achievement < 0.1 and es_achievement > 0.3):
-            # 成果レベルが大きく異なる → ペナルティ
-            achievement_bonus = -0.10
-        else:
-            # その他 → ニュートラル
-            achievement_bonus = 0.0
-
-        # スコアを更新
-        result.at[idx, 'similarity_score'] = (
-            row['similarity_score'] * (1 + achievement_bonus)
-        )
-
-    # ============================================
-    # ✅ 新規追加: 詳細度スコアの重み付け
-    # ============================================
-
-    print("  📝 詳細度スコアを計算中...")
-
-    # 入力ESの詳細度スコア
     input_detail = calculate_detail_score(input_text)
 
-    for idx, row in result.iterrows():
-        es_detail = calculate_detail_score(row['combined_answer'])
+    print("  🎯 ボーナススコアを計算中...")
 
-        # 詳細度の類似度を計算
+    # ============================================
+    # ボーナススコアの計算（加算式に変更）
+    # ============================================
+
+    for idx, row in result.iterrows():
+        base_score = row['similarity_score']
+        total_bonus = 0.0  # ボーナスの合計
+
+        # --------------------------------------------
+        # 1. テーマ一致ボーナス（最大+0.08）
+        # --------------------------------------------
+        es_themes = row['themes']
+        es_theme_names = set([t['theme'] for t in es_themes[:3]])
+        theme_overlap = len(input_theme_names & es_theme_names)
+
+        if theme_overlap >= 3:
+            total_bonus += 0.08  # 3つ一致
+        elif theme_overlap == 2:
+            total_bonus += 0.05  # 2つ一致
+        elif theme_overlap == 1:
+            total_bonus += 0.03  # 1つ一致
+
+        # --------------------------------------------
+        # 2. 定量的成果の一致度ボーナス（最大+0.10）
+        # --------------------------------------------
+        es_achievement = extract_quantitative_achievement_score(row['combined_answer'])
+
+        if input_achievement > 0.4 and es_achievement > 0.4:
+            total_bonus += 0.10  # 両方とも成果が強い
+        elif input_achievement > 0.2 and es_achievement > 0.2:
+            total_bonus += 0.06  # 両方とも成果がある
+        elif abs(input_achievement - es_achievement) < 0.15:
+            total_bonus += 0.04  # 成果レベルが近い
+        elif (input_achievement > 0.3 and es_achievement < 0.1) or \
+             (input_achievement < 0.1 and es_achievement > 0.3):
+            total_bonus -= 0.08  # 成果レベルが大きく異なる（ペナルティ）
+
+        # --------------------------------------------
+        # 3. 詳細度の一致度ボーナス（最大+0.08）
+        # --------------------------------------------
+        es_detail = calculate_detail_score(row['combined_answer'])
         detail_diff = abs(input_detail - es_detail)
 
         if detail_diff < 0.1:
-            # 詳細度が非常に近い → 大きなボーナス
-            detail_bonus = 0.12
+            total_bonus += 0.06  # 詳細度が非常に近い
         elif detail_diff < 0.2:
-            # 詳細度が近い → 中ボーナス
-            detail_bonus = 0.08
+            total_bonus += 0.04  # 詳細度が近い
         elif detail_diff < 0.3:
-            # 詳細度がやや近い → 小ボーナス
-            detail_bonus = 0.05
-        else:
-            # 詳細度が大きく異なる → ペナルティ
-            detail_bonus = -0.05
+            total_bonus += 0.02  # 詳細度がやや近い
+        elif detail_diff > 0.5:
+            total_bonus -= 0.04  # 詳細度が大きく異なる（ペナルティ）
 
         # 両方とも詳細度が高い場合は追加ボーナス
         if input_detail > 0.6 and es_detail > 0.6:
-            detail_bonus += 0.08
+            total_bonus += 0.02
 
-        # スコアを更新
-        result.at[idx, 'similarity_score'] = (
-            row['similarity_score'] * (1 + detail_bonus)
-        )
+        # --------------------------------------------
+        # 最終スコア計算（加算式）
+        # --------------------------------------------
+        final_score = base_score + total_bonus
+
+        # ✅ スコアを0.0〜1.0の範囲に制限（重要！）
+        final_score = max(0.0, min(1.0, final_score))
+
+        result.at[idx, 'similarity_score'] = final_score
 
     # 最終的にtop_nに絞る
     result = result.sort_values('similarity_score', ascending=False).head(top_n)
