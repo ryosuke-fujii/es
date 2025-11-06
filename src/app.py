@@ -1814,8 +1814,23 @@ def get_es_samples_by_company(similar_es, company_name, top_n=3):
     Returns:
         list: ESサンプルのリスト
     """
-    # この企業のESを類似度順で取得
+    # まず、類似度計算済みのESから取得を試みる
     company_es = similar_es[similar_es['company_name'] == company_name]
+
+    # 類似度計算済みにない場合は、es_data全体から取得
+    if len(company_es) == 0:
+        print(f"  ℹ️ {company_name} のESをes_dataから取得します")
+        company_es = es_data[es_data['company_name'] == company_name].copy()
+
+        # similarity_scoreがない場合は、デフォルト値を設定
+        if 'similarity_score' not in company_es.columns:
+            company_es['similarity_score'] = 0.5  # デフォルト値
+
+        # 最新のものから取得（result_statusで内定を優先）
+        company_es = company_es.sort_values(
+            by=['result_status', 'similarity_score'],
+            ascending=[False, False]
+        )
 
     if len(company_es) == 0:
         return []
