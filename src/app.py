@@ -1036,6 +1036,13 @@ def load_csv_data(csv_path):
     df = pd.read_csv(csv_path)
     print(f"✅ {len(df)}件のデータを読み込みました")
 
+    # 🆕 データソース別の統計を表示
+    if 'data_source' in df.columns:
+        print("\n📊 データソース別の内訳:")
+        source_counts = df['data_source'].value_counts()
+        for source, count in source_counts.items():
+            print(f"  - {source}: {count}件")
+
     print("🔧 データ整形中...")
 
     es_data = pd.DataFrame({
@@ -1051,6 +1058,9 @@ def load_csv_data(csv_path):
         'answer_3': df.get('c-show-more__content (3)', pd.Series()).apply(clean_text),
         'avg_salary': df.get('p-company-table (11)', pd.Series()).apply(clean_text),
         'employee_count': df.get('p-company-summary__stage-sub (3)', pd.Series()).apply(remove_prefix),
+        # 🆕 データソース情報を保持
+        'data_source': df.get('data_source', pd.Series(dtype='object')),
+        'original_url': df.get('original_url', pd.Series(dtype='object'))
     })
 
     es_data['university'] = es_data['user_info'].apply(extract_university)
@@ -1791,6 +1801,8 @@ def get_similar_es_samples(similar_es, top_n=3):
                 'industry': str(row['industry']) if not pd.isna(row['industry']) else '不明',
                 'result': str(row['result_status']),
                 'similarity': round(float(row['similarity_score']) * 100, 1),
+                # 🆕 データソースを追加
+                'dataSource': str(row.get('data_source', '不明')),
                 'profile': {
                     'university': university,
                     'major': major,
@@ -1867,6 +1879,8 @@ def get_es_samples_by_company(similar_es, company_name, top_n=3):
                 'industry': str(row['industry']) if not pd.isna(row['industry']) else '不明',
                 'result': str(row['result_status']),
                 'similarity': round(float(row['similarity_score']) * 100, 1),
+                # 🆕 データソースを追加
+                'dataSource': str(row.get('data_source', '不明')),
                 'profile': {
                     'university': university,
                     'major': major,
@@ -1998,6 +2012,8 @@ def get_episode_type_similar_es_samples(similar_es, input_text, top_n=3):
                 'similarity': round(float(row['similarity_score']) * 100, 1),
                 'episodeType': episode_info['type'],
                 'episodeConfidence': episode_info['confidence'],
+                # 🆕 データソースを追加
+                'dataSource': str(row.get('data_source', '不明')),
                 'profile': {
                     'university': university,
                     'major': major,
