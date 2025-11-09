@@ -68,14 +68,22 @@ import os
 # Google Driveをマウント
 drive.mount('/content/drive')
 
-# CSVファイルのパスを設定
-csv_path = "/content/drive/MyDrive/your-folder/es_data.csv"
+# 統合CSVファイルのパスを設定（就活会議 + ワンキャリア）
+csv_path = "/content/drive/MyDrive/企画・マーケチーム/gaxi_自動化/Python/ESデータ整形/unified_es_data.csv"
 
 # ファイルが存在するか確認
 if os.path.exists(csv_path):
     print(f"✅ ファイルを発見: {csv_path}")
+    # データソース情報を確認
+    import pandas as pd
+    df = pd.read_csv(csv_path)
+    print(f"📊 データ件数: {len(df)}件")
+    if 'data_source' in df.columns:
+        print("\nデータソース内訳:")
+        print(df['data_source'].value_counts())
 else:
     print(f"❌ ファイルが見つかりません: {csv_path}")
+    print("💡 パスを確認してください")
 ```
 
 ##### 選択肢B: 直接アップロード
@@ -276,8 +284,8 @@ TOKEN = "YOUR_GITHUB_TOKEN"
 ### 1. Google Driveでデータを管理
 
 ```python
-# データパスをデフォルト設定
-DEFAULT_CSV = "/content/drive/MyDrive/es-tool/data.csv"
+# 統合CSVデータパスをデフォルト設定（就活会議 + ワンキャリア）
+DEFAULT_CSV = "/content/drive/MyDrive/企画・マーケチーム/gaxi_自動化/Python/ESデータ整形/unified_es_data.csv"
 
 import os
 from google.colab import drive
@@ -287,6 +295,13 @@ if not os.path.exists('/content/drive'):
 
 csv_path = DEFAULT_CSV if os.path.exists(DEFAULT_CSV) else "data/sample.csv"
 print(f"📂 使用するCSVファイル: {csv_path}")
+
+# データソース情報を確認
+if os.path.exists(csv_path) and 'unified' in csv_path:
+    import pandas as pd
+    df = pd.read_csv(csv_path, nrows=1)  # 1行だけ読み込んで確認
+    if 'data_source' in df.columns:
+        print("✅ 統合CSVデータ（就活会議 + ワンキャリア）")
 ```
 
 ### 2. ngrokトークンをシークレットに保存
@@ -388,17 +403,34 @@ import matplotlib.pyplot as plt
 # データを読み込み
 df = pd.read_csv(csv_path)
 
-# 業界別の集計
-industry_counts = df['業界'].value_counts()
+# データソース別の集計（統合CSVの場合）
+if 'data_source' in df.columns:
+    print("📊 データソース別の内訳:")
+    source_counts = df['data_source'].value_counts()
+    print(source_counts)
 
-# グラフ表示
-plt.figure(figsize=(10, 6))
-industry_counts.head(10).plot(kind='bar')
-plt.title('業界別ES数 TOP10')
-plt.xlabel('業界')
-plt.ylabel('件数')
-plt.tight_layout()
-plt.show()
+    # データソース別のグラフ
+    plt.figure(figsize=(10, 6))
+    source_counts.plot(kind='bar')
+    plt.title('データソース別ES数')
+    plt.xlabel('データソース')
+    plt.ylabel('件数')
+    plt.tight_layout()
+    plt.show()
+
+# 業界別の集計
+industry_col = 'p-company-summary__stage-sub'  # 統合スキーマのカラム名
+if industry_col in df.columns:
+    industry_counts = df[industry_col].value_counts()
+
+    # グラフ表示
+    plt.figure(figsize=(12, 6))
+    industry_counts.head(10).plot(kind='bar')
+    plt.title('業界別ES数 TOP10')
+    plt.xlabel('業界')
+    plt.ylabel('件数')
+    plt.tight_layout()
+    plt.show()
 ```
 
 ## 🎓 次のステップ
