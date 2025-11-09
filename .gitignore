@@ -55,3 +55,4 @@ Thumbs.db
 # ngrok
 ngrok.yml
 ngrok.exe
+es_preprocessed_data/

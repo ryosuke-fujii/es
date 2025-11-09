@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  es-tool:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: es-diagnosis-tool
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # 前処理済みデータをマウント（オプション）
+      - ./es_preprocessed_data:/app/es_preprocessed_data:ro
+      # データディレクトリをマウント（オプション）
+      - ./data:/app/data:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G

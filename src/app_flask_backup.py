@@ -1,22 +1,16 @@
 # ============================================
-# ES診断アプリケーション（FastAPI版）
+# セル3: ES診断アプリケーション（Flask統合版）
 # ============================================
 import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from flask import Flask, request, jsonify, render_template, Response
 import json
 import re
+import threading
 import time
 import os
-import pickle
-from scipy import sparse
 
 # グローバル変数
 es_data = None
@@ -227,37 +221,11 @@ EPISODE_TYPES = {
     }
 }
 
-# FastAPIアプリケーションの初期化
+# Flaskアプリケーションの初期化
+# templatesフォルダを親ディレクトリから読み込む
 base_dir = os.path.dirname(os.path.abspath(__file__))
 template_dir = os.path.join(os.path.dirname(base_dir), 'templates')
-
-# FastAPIアプリの作成
-app = FastAPI(
-    title="ES診断ツール",
-    description="ES診断・企業マッチングAPI",
-    version="2.0.0"
-)
-
-# CORSミドルウェアの追加（必要に応じて）
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # 本番環境では適切なオリジンを指定
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ============================================
-# Pydanticモデル（リクエスト/レスポンス）
-# ============================================
-
-class AnalyzeRequest(BaseModel):
-    esAnswers: List[str]
-    targetIndustry: str
-    university: Optional[str] = ""
-    targetCompanies: Optional[List[str]] = []
-    major: Optional[str] = ""
-    graduationYear: Optional[str] = ""
+app = Flask(__name__, template_folder=template_dir)
 
 # ============================================
 # データ処理関数
@@ -1304,103 +1272,6 @@ def load_csv_data(csv_path):
     print(f"  - 業界: {len(industries_list)}種類")
     print(f"  - 企業: {len(companies_list)}社")
 
-def load_preprocessed_data(preprocessed_dir='es_preprocessed_data', csv_basename='unified_es_data'):
-    """前処理済みデータを読み込む（高速起動用）"""
-    global es_data, vectorizer, tfidf_matrix, sentence_model
-    global universities_list, industries_list, companies_list, common_questions
-    global company_counts, industry_counts
-
-    print(f"\n⚡ 前処理済みデータを読み込み中...")
-    print(f"📂 保存先: {preprocessed_dir}")
-
-    # 前処理済みデータのファイルパス
-    preprocessed_files = {
-        'es_data': os.path.join(preprocessed_dir, f'{csv_basename}_es_data.pkl'),
-        'tfidf_matrix': os.path.join(preprocessed_dir, f'{csv_basename}_tfidf_matrix.npz'),
-        'vectorizer': os.path.join(preprocessed_dir, f'{csv_basename}_vectorizer.pkl'),
-        'embeddings': os.path.join(preprocessed_dir, f'{csv_basename}_embeddings.npy')
-    }
-
-    # すべてのファイルが存在するかチェック
-    all_files_exist = all(os.path.exists(f) for f in preprocessed_files.values())
-
-    if not all_files_exist:
-        print("❌ 前処理済みデータが見つかりません")
-        print("💡 CSVから読み込む必要があります")
-        return False
-
-    try:
-        # es_dataを読み込み
-        with open(preprocessed_files['es_data'], 'rb') as f:
-            es_data = pickle.load(f)
-        print(f"  ✅ es_data: {len(es_data)}件")
-
-        # TF-IDF行列を読み込み
-        tfidf_matrix = sparse.load_npz(preprocessed_files['tfidf_matrix'])
-        print(f"  ✅ tfidf_matrix: {tfidf_matrix.shape}")
-
-        # Vectorizerを読み込み
-        with open(preprocessed_files['vectorizer'], 'rb') as f:
-            vectorizer = pickle.load(f)
-        print(f"  ✅ vectorizer")
-
-        # セマンティックエンベディングを読み込み
-        if os.path.exists(preprocessed_files['embeddings']):
-            # Sentence-BERTモデルをロード（エンベディング計算には不要だが、モデルは必要）
-            try:
-                from sentence_transformers import SentenceTransformer
-                if sentence_model is None:
-                    print("  📥 Sentence-BERTモデルをロード中...")
-                    sentence_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
-                    print("  ✅ モデルロード完了")
-            except ImportError:
-                print("  ⚠️ sentence-transformersが利用できません。セマンティック検索は無効です。")
-
-            # エンベディングを読み込み
-            embeddings_array = np.load(preprocessed_files['embeddings'])
-            es_data['semantic_embedding'] = list(embeddings_array)
-            print(f"  ✅ semantic_embeddings: {len(es_data['semantic_embedding'])}件")
-
-        # 選択肢を抽出
-        universities_list = sorted(es_data['university'].dropna().unique().tolist())
-        universities_list = [u for u in universities_list if u != "不明" and str(u).strip() != ""]
-
-        industries_list = sorted(es_data['industry'].dropna().unique().tolist())
-        industries_list = [i for i in industries_list if i and str(i).strip() != ""]
-
-        companies_list = es_data['company_name'].dropna().unique().tolist()
-        companies_list = [c for c in companies_list if c and str(c).strip() != "" and len(str(c).strip()) > 1]
-        companies_list = sorted(companies_list, key=lambda x: str(x))
-
-        company_counts = es_data['company_name'].value_counts().to_dict()
-        industry_counts = es_data['industry'].value_counts().to_dict()
-
-        common_questions = [
-            "学生時代に力を入れたこと（ガクチカ）",
-            "志望動機",
-            "自己PR",
-            "あなたの強みとエピソード",
-            "挑戦したこと・チャレンジ",
-            "困難を乗り越えた経験",
-            "チームで成果を出した経験",
-            "リーダーシップを発揮した経験",
-            "インターンで学びたいこと",
-            "将来のキャリアビジョン"
-        ]
-
-        print(f"\n✅ 前処理済みデータの読み込みが完了しました")
-        print(f"  - 大学: {len(universities_list)}校")
-        print(f"  - 業界: {len(industries_list)}種類")
-        print(f"  - 企業: {len(companies_list)}社")
-
-        return True
-
-    except Exception as e:
-        print(f"❌ 前処理済みデータの読み込みに失敗しました: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
-
 def calculate_similarity(input_text, top_n=100):
     """類似度計算（修正版：100%を超えないように調整）
 
@@ -2168,11 +2039,11 @@ def get_episode_type_similar_es_samples(similar_es, input_text, top_n=3):
 # HTMLテンプレートは templates/index.html から読み込み
 
 # ============================================
-# FastAPIルート
+# Flaskルート
 # ============================================
 
-@app.get("/", response_class=HTMLResponse)
-async def home():
+@app.route('/')
+def home():
     """フロントエンドUI - データを埋め込んだHTMLを返す"""
     print("\n🌐 ページ生成中...")
 
@@ -2216,31 +2087,33 @@ async def home():
 
     print(f"  ✅ データ埋め込み完了: 大学{len(embedded_data['universities'])}校, 業界{len(embedded_data['industries'])}種類")
 
-    return HTMLResponse(content=html_content)
+    return Response(html_content, mimetype='text/html')
 
-@app.post("/analyze")
-async def analyze_es(data: AnalyzeRequest):
+@app.route('/analyze', methods=['POST'])
+def analyze_es():
     """ES診断API - 複数ES質問対応"""
     try:
+        data = request.get_json()
+
         # 複数のES回答に対応
-        if not data.esAnswers or len(data.esAnswers) == 0:
-            raise HTTPException(status_code=400, detail='ES回答を入力してください')
+        if not data.get('esAnswers') or len(data.get('esAnswers', [])) == 0:
+            return jsonify({'error': 'ES回答を入力してください'}), 400
 
-        has_long_answer = any(len(ans) >= 100 for ans in data.esAnswers)
+        has_long_answer = any(len(ans) >= 100 for ans in data['esAnswers'])
         if not has_long_answer:
-            raise HTTPException(status_code=400, detail='少なくとも1つの回答は100文字以上入力してください')
+            return jsonify({'error': '少なくとも1つの回答は100文字以上入力してください'}), 400
 
-        if not data.targetIndustry:
-            raise HTTPException(status_code=400, detail='志望業界を選択してください')
+        if not data.get('targetIndustry'):
+            return jsonify({'error': '志望業界を選択してください'}), 400
 
         # 全ての回答を結合して類似度計算
-        combined_answers = ' '.join(data.esAnswers)
+        combined_answers = ' '.join(data['esAnswers'])
         similar_es = calculate_similarity(combined_answers, top_n=100)
 
         top_companies = get_top_companies(
             similar_es,
-            data.targetIndustry,
-            data.university,
+            data['targetIndustry'],
+            data.get('university', ''),
             top_n=5
         )
 
@@ -2252,9 +2125,9 @@ async def analyze_es(data: AnalyzeRequest):
                 top_n=3  # 各企業から3件のESを取得
             )
 
-        industry_analysis = analyze_industry(data.targetIndustry)
-        es_analysis = analyze_es_answers(data.esAnswers)
-        industry_similar_es_samples = get_industry_similar_es_samples(similar_es, data.targetIndustry, top_n=3)
+        industry_analysis = analyze_industry(data['targetIndustry'])
+        es_analysis = analyze_es_answers(data['esAnswers'])
+        industry_similar_es_samples = get_industry_similar_es_samples(similar_es, data['targetIndustry'], top_n=3)
 
         # 入力ESのエピソードタイプを判定
         input_episode_info = classify_episode_type(combined_answers)
@@ -2269,14 +2142,14 @@ async def analyze_es(data: AnalyzeRequest):
 
         # 志望企業のマッチ率を計算（第三志望まで）
         target_companies_match = []
-        if data.targetCompanies and len(data.targetCompanies) > 0:
-            for i, target_company in enumerate(data.targetCompanies, 1):
+        if data.get('targetCompanies') and len(data['targetCompanies']) > 0:
+            for i, target_company in enumerate(data['targetCompanies'], 1):
                 if target_company and target_company.strip():
                     match_result = calculate_target_company_match(
                         target_company,
                         similar_es,
-                        data.targetIndustry,
-                        data.university,
+                        data['targetIndustry'],
+                        data.get('university', ''),
                         rank=i  # 志望順位を渡す
                     )
                     if match_result:
@@ -2293,12 +2166,12 @@ async def analyze_es(data: AnalyzeRequest):
         # 統計情報を計算
         total_es_count = len(es_data)
         matched_es_count = len(similar_es)
-        industry_es_count = len(es_data[es_data['industry'].str.contains(data.targetIndustry, na=False)])
+        industry_es_count = len(es_data[es_data['industry'].str.contains(data['targetIndustry'], na=False)])
 
         # 志望企業のデータ数をカウント
         target_companies_data_count = {}
-        if data.targetCompanies and len(data.targetCompanies) > 0:
-            for target_company in data.targetCompanies:
+        if data.get('targetCompanies') and len(data['targetCompanies']) > 0:
+            for target_company in data['targetCompanies']:
                 if target_company and target_company.strip():
                     count = len(es_data[es_data['company_name'] == target_company])
                     target_companies_data_count[target_company] = count
@@ -2323,9 +2196,9 @@ async def analyze_es(data: AnalyzeRequest):
                 'avgMatchRate': round(avg_match_rate, 1)
             },
             'userInfo': {
-                'university': data.university,
-                'major': data.major,
-                'graduationYear': data.graduationYear
+                'university': data.get('university'),
+                'major': data.get('major'),
+                'graduationYear': data.get('graduationYear')
             },
             'episodeTypeInfo': {  # エピソードタイプ情報
                 'primary': input_episode_info,
@@ -2333,78 +2206,10 @@ async def analyze_es(data: AnalyzeRequest):
             }
         }
 
-        return response
+        return jsonify(response)
 
-    except HTTPException:
-        raise
     except Exception as e:
         print(f"❌ エラー発生: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ============================================
-# 起動時のイベントハンドラ
-# ============================================
-
-@app.on_event("startup")
-async def startup_event():
-    """アプリケーション起動時にデータを読み込む"""
-    print("\n" + "="*60)
-    print("🚀 ES診断ツール（FastAPI版）起動中...")
-    print("="*60)
-    
-    # 前処理済みデータの読み込みを試みる
-    preprocessed_loaded = load_preprocessed_data()
-    
-    if not preprocessed_loaded:
-        # 前処理済みデータがない場合、CSVから読み込む
-        csv_path = os.path.join(base_dir, '..', 'data', 'unified_es_data_en.csv')
-        
-        if os.path.exists(csv_path):
-            print(f"\n📂 CSVファイルからデータを読み込みます: {csv_path}")
-            load_csv_data(csv_path)
-        else:
-            print(f"\n❌ CSVファイルが見つかりません: {csv_path}")
-            print("⚠️ データが読み込まれていない状態で起動します")
-            print("💡 /analyzeエンドポイントは使用できません")
-    
-    print("\n" + "="*60)
-    print("✅ 起動完了！")
-    print("="*60)
-    print(f"📊 データ統計:")
-    if es_data is not None:
-        print(f"  - ES件数: {len(es_data)}件")
-        print(f"  - 企業数: {len(companies_list)}社")
-        print(f"  - 業界数: {len(industries_list)}種類")
-        print(f"  - 大学数: {len(universities_list)}校")
-    else:
-        print("  - データなし")
-    print("="*60)
-
-# ============================================
-# メイン実行
-# ============================================
-
-if __name__ == "__main__":
-    import uvicorn
-    
-    # 起動設定
-    config = {
-        "app": "app:app",
-        "host": "0.0.0.0",
-        "port": 8000,
-        "reload": True,  # 開発時のみTrue
-        "log_level": "info"
-    }
-    
-    print("\n🔧 サーバー起動設定:")
-    print(f"  - Host: {config['host']}")
-    print(f"  - Port: {config['port']}")
-    print(f"  - Reload: {config['reload']}")
-    print(f"\n🌐 アクセスURL: http://localhost:{config['port']}")
-    print(f"📚 APIドキュメント: http://localhost:{config['port']}/docs")
-    print(f"📘 ReDoc: http://localhost:{config['port']}/redoc")
-    print("")
-    
-    uvicorn.run(**config)
+        return jsonify({'error': str(e)}), 500

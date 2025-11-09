@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# 環境
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+.claude/
+
+# Git
+.git/
+.gitignore
+
+# ドキュメント
+*.md
+!README.md
+
+# その他
+*.log
+.pytest_cache/
+.coverage
+htmlcov/
+
+# バックアップファイル
+src/app_flask_backup.py

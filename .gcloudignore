@@ -1,0 +1,62 @@
+# .gcloudignore
+# Cloud Build で除外するファイル/ディレクトリ
+
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+.claude/
+
+# ドキュメント
+*.md
+!README.md
+!DEPLOY.md
+
+# ログとキャッシュ
+*.log
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+notebooks/
+*.ipynb
+
+# テスト
+tests/
+test_*.py
+
+# バックアップ
+*.bak
+src/app_flask_backup.py
+
+# ローカル設定
+.env
+.env.local
+docker-compose.yml
+docker-compose.override.yml
+
+# その他
+tmp/
+temp/
+.cache/
