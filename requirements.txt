@@ -7,3 +7,7 @@ sentence-transformers>=2.2.0
 tqdm>=4.65.0
 scipy>=1.10.0
 python-multipart>=0.0.6
+# 日本語形態素解析
+janome>=0.5.0
+mecab-python3>=1.0.6
+unidic-lite>=1.0.8

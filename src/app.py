@@ -18,6 +18,72 @@ import os
 import pickle
 from scipy import sparse
 
+# ============================================
+# 日本語形態素解析器クラス
+# ============================================
+class JapaneseTokenizer:
+    """日本語形態素解析器（MeCab/Janomeフォールバック対応）"""
+
+    def __init__(self):
+        self.tokenizer = None
+        self.tokenizer_type = None
+        self._initialize_tokenizer()
+
+    def _initialize_tokenizer(self):
+        """形態素解析器を初期化（MeCab優先、なければJanome）"""
+        # まずMeCabを試す（高速）
+        try:
+            import MeCab
+            self.tokenizer = MeCab.Tagger('-Owakati')
+            self.tokenizer_type = 'MeCab'
+            print("✅ MeCabを使用します")
+        except Exception as e:
+            print(f"⚠️ MeCabが利用できません: {e}")
+
+            # Janomeにフォールバック（Pure Python）
+            try:
+                from janome.tokenizer import Tokenizer
+                self.tokenizer = Tokenizer()
+                self.tokenizer_type = 'Janome'
+                print("✅ Janomeを使用します")
+            except Exception as e:
+                print(f"⚠️ Janomeも利用できません: {e}")
+                print("⚠️ 形態素解析なしで動作します")
+                self.tokenizer_type = None
+
+    def tokenize(self, text):
+        """テキストを形態素解析してトークンのリストを返す"""
+        if self.tokenizer is None:
+            # 形態素解析器がない場合は単純な分かち書き
+            return text.split()
+
+        if self.tokenizer_type == 'MeCab':
+            # MeCabの場合
+            try:
+                result = self.tokenizer.parse(text).strip()
+                return result.split()
+            except Exception as e:
+                print(f"⚠️ MeCab解析エラー: {e}")
+                return text.split()
+
+        elif self.tokenizer_type == 'Janome':
+            # Janomeの場合
+            try:
+                # 名詞、動詞、形容詞のみを抽出（助詞・助動詞を除外）
+                tokens = []
+                for token in self.tokenizer.tokenize(text):
+                    # 品詞情報を取得
+                    pos = token.part_of_speech.split(',')[0]
+                    # 名詞、動詞、形容詞、副詞を抽出
+                    if pos in ['名詞', '動詞', '形容詞', '副詞']:
+                        tokens.append(token.surface)
+                return tokens if tokens else text.split()
+            except Exception as e:
+                print(f"⚠️ Janome解析エラー: {e}")
+                return text.split()
+
+        return text.split()
+
 # グローバル変数
 es_data = None
 vectorizer = None
@@ -1138,12 +1204,16 @@ def load_csv_data(csv_path):
     print("\n🔧 キーワード重み付け中...")
     es_data['weighted_answer'] = es_data['combined_answer'].apply(extract_theme_keywords_for_weighting)
 
-    print("🔧 TF-IDFベクトル化中（最適化済みパラメータ）...")
+    print("🔧 TF-IDFベクトル化中（日本語形態素解析付き）...")
+    # 日本語形態素解析器を初期化
+    tokenizer = JapaneseTokenizer()
     vectorizer = TfidfVectorizer(
-        max_features=3000,  # 1000 → 3000に増加
+        max_features=3000,
         min_df=2,
         max_df=0.8,
-        ngram_range=(1, 3)  # (1,2) → (1,3)に拡張
+        ngram_range=(1, 3),
+        tokenizer=tokenizer.tokenize,  # 日本語形態素解析を適用
+        token_pattern=None  # tokenizerを使うため、token_patternは無効化
     )
 
     # 重み付けされたテキストを使用してベクトル化
@@ -1169,8 +1239,8 @@ def load_csv_data(csv_path):
         # 1. モデルのロード
         if sentence_model is None:
             print("  📥 セマンティックモデルをダウンロード中...")
-            # 軽量モデルを使用（384次元、約2倍速い）
-            sentence_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+            # 日本語専用BERTモデルを使用（高精度）
+            sentence_model = SentenceTransformer('sonoisa/sentence-bert-base-ja-mean-tokens-v2')
 
             # GPU対応（利用可能な場合）
             try:
@@ -1351,7 +1421,7 @@ def load_preprocessed_data(preprocessed_dir='es_preprocessed_data', csv_basename
                 from sentence_transformers import SentenceTransformer
                 if sentence_model is None:
                     print("  📥 Sentence-BERTモデルをロード中...")
-                    sentence_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+                    sentence_model = SentenceTransformer('sonoisa/sentence-bert-base-ja-mean-tokens-v2')
                     print("  ✅ モデルロード完了")
             except ImportError:
                 print("  ⚠️ sentence-transformersが利用できません。セマンティック検索は無効です。")
@@ -1435,8 +1505,8 @@ def calculate_similarity(input_text, top_n=100):
     # ハイブリッドスコア（セマンティックが使える場合は重視）
     if has_semantic:
         combined_similarities = (
-            tfidf_similarities * 0.3 +      # キーワードマッチ
-            semantic_similarities * 0.7     # 意味マッチ
+            tfidf_similarities * 0.25 +     # キーワードマッチ（TF-IDF）
+            semantic_similarities * 0.75    # 意味マッチ（BERT）
         )
     else:
         combined_similarities = tfidf_similarities
