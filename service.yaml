@@ -29,6 +29,11 @@ spec:
         env:
         - name: PYTHONUNBUFFERED
           value: '1'
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: openai-api-key
+              key: latest
         resources:
           limits:
             cpu: '2000m'

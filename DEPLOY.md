@@ -88,8 +88,10 @@ gcloud run deploy es-diagnosis-tool \
   --timeout 300 \
   --max-instances 10 \
   --min-instances 0 \
-  --set-env-vars "PYTHONUNBUFFERED=1"
+  --set-env-vars "PYTHONUNBUFFERED=1,OPENAI_API_KEY=your-openai-api-key"
 ```
+
+**注意**: `OPENAI_API_KEY`には実際のOpenAI APIキーを設定してください。類似・改善点分析機能で使用されます。
 
 デプロイが完了すると、URLが表示されます：
 ```
@@ -110,7 +112,7 @@ gsutil mb -l $REGION gs://${PROJECT_ID}-es-data
 gsutil -m cp -r es_preprocessed_data/* gs://${PROJECT_ID}-es-data/preprocessed/
 
 # CSVファイルもアップロード（オプション）
-gsutil cp data/unified_es_data_en.csv gs://${PROJECT_ID}-es-data/raw/
+gsutil cp data/unified_es_data_20251109.csv gs://${PROJECT_ID}-es-data/raw/
 ```
 
 ### Cloud Storage からデータを読み込む（オプション）
@@ -163,8 +165,39 @@ Cloud Run で環境変数を設定する場合：
 ```bash
 gcloud run services update es-diagnosis-tool \
   --region $REGION \
-  --set-env-vars "PROJECT_ID=$PROJECT_ID,GCS_BUCKET=${PROJECT_ID}-es-data"
+  --set-env-vars "PROJECT_ID=$PROJECT_ID,GCS_BUCKET=${PROJECT_ID}-es-data,OPENAI_API_KEY=your-openai-api-key"
 ```
+
+### 必須の環境変数
+
+| 変数名 | 説明 | 必須/オプション |
+|--------|------|----------------|
+| `OPENAI_API_KEY` | OpenAI APIキー（類似・改善点分析機能で使用） | **必須** |
+| `PROJECT_ID` | GCPプロジェクトID | オプション |
+| `GCS_BUCKET` | Cloud Storageバケット名 | オプション |
+| `PYTHONUNBUFFERED` | Python出力のバッファリング無効化 | オプション |
+
+## 新機能（2025年11月更新）
+
+### 1. 結果画面での編集・再診断機能
+診断結果画面の上部に編集可能フォームが表示され、以下の項目を変更して即座に再診断できます：
+- ES回答の編集
+- 志望業界の変更
+- 大学名、専攻、卒業年度の変更
+- 志望企業の変更
+- **「内定のみに絞る」フィルター** - チェックを入れると内定・内々定・最終面接通過のES例のみを表示
+
+### 2. OpenAI APIによる類似・改善点分析
+各類似ESカードに「類似・改善点分析」ボタンが追加され、クリックするとOpenAI API（GPT-4o-mini）を使用して：
+- あなたのESと合格ESの類似点を分析
+- 具体的な改善提案を生成
+- AIによる建設的なフィードバックを提供
+
+**必須設定**: この機能を使用するには`OPENAI_API_KEY`環境変数の設定が必要です。
+
+### 3. データソースの更新
+- 最新データ: `data/unified_es_data_20251109.csv`
+- 前処理済みデータも最新版に対応
 
 ## カスタムドメインの設定
 

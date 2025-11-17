@@ -20,6 +20,12 @@ Google Colab上で実行していたFlask版のES診断ツールをFastAPIに移
 - **環境変数対応**: 設定をコマンドライン引数で指定可能
 - **自動リロード**: 開発時のコード変更を自動検知
 
+### 最新機能（2025年11月更新）
+- **結果画面での編集・再診断**: 診断結果を見ながら条件を変更して即座に再診断
+- **「内定のみに絞る」フィルター**: チェックボックスで内定・内々定のES例のみを表示
+- **AI による類似・改善点分析**: OpenAI API（GPT-4o-mini）を使用して、あなたのESと合格ESを比較分析し、具体的な改善提案を生成
+- **最新データ対応**: `unified_es_data_20251109.csv`（2025年11月時点の最新ES実績データ）
+
 ## セットアップ
 
 ### 1. 依存パッケージのインストール
@@ -34,7 +40,7 @@ pip install -r requirements.txt
 
 #### 方法A: CSVファイルから読み込む（初回）
 ```
-data/unified_es_data_en.csv
+data/unified_es_data_20251109.csv
 ```
 を配置してください。
 
@@ -191,7 +197,7 @@ print("✅ 前処理済みデータの保存が完了しました")
 ```
 
 **対処法**:
-1. `data/unified_es_data_en.csv`が存在するか確認
+1. `data/unified_es_data_20251109.csv`が存在するか確認
 2. ファイルパスが正しいか確認
 3. 前処理済みデータがあれば、そちらを使用
 
@@ -324,7 +330,7 @@ es-opt/
 ├── templates/
 │   └── index.html                # フロントエンドUI
 ├── data/
-│   └── unified_es_data_en.csv    # 元データ
+│   └── unified_es_data_20251109.csv    # 元データ（最新版）
 ├── es_preprocessed_data/          # 前処理済みデータ
 │   ├── unified_es_data_es_data.pkl
 │   ├── unified_es_data_tfidf_matrix.npz

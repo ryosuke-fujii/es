@@ -42,6 +42,7 @@ steps:
       - '--min-instances=${_MIN_INSTANCES}'
       - '--port=8000'
       - '--set-env-vars=PYTHONUNBUFFERED=1'
+      - '--update-secrets=OPENAI_API_KEY=openai-api-key:latest'
     timeout: 600s
 
 # イメージを保存

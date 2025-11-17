@@ -215,6 +215,7 @@ gcloud run deploy $SERVICE_NAME \
   --max-instances=$DEFAULT_MAX_INSTANCES \
   --min-instances=$DEFAULT_MIN_INSTANCES \
   --set-env-vars="PYTHONUNBUFFERED=1,PROJECT_ID=$PROJECT_ID,GCS_BUCKET=$BUCKET_NAME" \
+  --update-secrets="OPENAI_API_KEY=openai-api-key:latest" \
   --quiet
 
 log_success "デプロイ完了！"
