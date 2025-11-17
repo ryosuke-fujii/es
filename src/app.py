@@ -1731,12 +1731,16 @@ def calculate_individual_similarity(input_text, target_es_data):
     # 入力テキストにも同じ重み付けを適用
     weighted_input = extract_theme_keywords_for_weighting(input_text)
 
-    # TF-IDF類似度
+    # TF-IDF類似度（テキストから直接計算）
     input_vector = vectorizer.transform([weighted_input])
 
-    # 対象ESのインデックスを取得
-    target_indices = target_es_data.index.tolist()
-    target_tfidf_matrix = tfidf_matrix[target_indices]
+    # 対象ESのテキストをベクトル化
+    target_texts = []
+    for _, row in target_es_data.iterrows():
+        weighted_text = extract_theme_keywords_for_weighting(row['combined_answer'])
+        target_texts.append(weighted_text)
+
+    target_tfidf_matrix = vectorizer.transform(target_texts)
     tfidf_similarities = cosine_similarity(input_vector, target_tfidf_matrix)[0]
 
     # セマンティック類似度（BERT）
