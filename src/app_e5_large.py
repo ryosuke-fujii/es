@@ -1,0 +1,2858 @@
+# ============================================
+# ES診断アプリケーション（FastAPI版）
+# ============================================
+import pandas as pd
+import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Optional, Dict, Any
+import json
+import re
+import time
+import os
+import pickle
+from scipy import sparse
+from openai import OpenAI
+from dotenv import load_dotenv
+
+# 環境変数を読み込み
+load_dotenv()
+
+# グローバル変数
+es_data = None
+vectorizer = None
+tfidf_matrix = None
+sentence_model = None  # Sentence-BERTモデル
+
+# 選択肢用データ
+universities_list = []
+industries_list = []
+companies_list = []
+common_questions = []
+company_counts = {}
+industry_counts = {}
+
+# 業界の大分類リスト
+INDUSTRY_MAJOR_CATEGORIES = [
+    'IT・通信',
+    'インフラ・物流・エネルギー',
+    'コンサル・シンクタンク',
+    'サービス',
+    'メーカー・製造業',
+    '不動産',
+    '商社・卸',
+    '小売り',
+    '広告・マスコミ',
+    '金融'
+]
+
+# ESテーマカテゴリ体系（実データ分析に基づく）
+ES_THEME_CATEGORIES = {
+    # 活動フィールド
+    '研究・学術活動': [
+        '研究', 'ゼミ', '論文', '学会', '実験', '調査', '分析', '考察'
+    ],
+    'ビジネス経験': [
+        'インターン', 'アルバイト', '長期インターン', '実務経験', '職務経験', '営業', '接客'
+    ],
+    '課外活動': [
+        'サークル', '部活', '学生団体', 'ボランティア', '課外', 'スポーツ'
+    ],
+    # アクション・スキル
+    '課題解決・改善': [
+        '課題', '問題', '解決', '改善', '克服', '対策', '施策', '打開'
+    ],
+    'リーダーシップ・組織運営': [
+        'リーダー', '代表', 'マネジメント', '統率', '組織', '運営', '主導'
+    ],
+    'チームワーク・協働': [
+        'チーム', 'メンバー', '協力', '連携', '協働', 'グループ', '共同'
+    ],
+    '企画・提案': [
+        '企画', '提案', 'アイデア', '立案', '新規', '発案', 'プラン'
+    ],
+    '技術開発・創造': [
+        '開発', 'プログラミング', 'システム', '設計', '実装', '制作', '構築'
+    ],
+    # マインド・姿勢
+    '挑戦・目標達成': [
+        '挑戦', '目標', '達成', 'チャレンジ', '新しい', '初めて', '未経験'
+    ],
+    '困難克服・逆境': [
+        '困難', '失敗', '乗り越え', '苦労', '壁', '逆境', 'トラブル', '危機'
+    ],
+    '成長・学習': [
+        '成長', '学び', '習得', '経験', '気づき', '獲得', '身につけた'
+    ],
+    # 成果・インパクト
+    '定量的成果': [
+        '売上', '増加', '削減', '向上', '%', '倍', '人', '件', '円', '達成率'
+    ],
+    '社会貢献・影響力': [
+        '社会', '貢献', '支援', '地域', '影響', '価値', 'インパクト'
+    ],
+    # 志望動機・キャリア
+    '企業理解・共感': [
+        '理念', 'ビジョン', '事業', '強み', '魅力', '特徴', '姿勢', '取り組み'
+    ],
+    'キャリアビジョン': [
+        '将来', 'キャリア', '実現したい', '成し遂げたい', '目指す', '夢'
+    ]
+}
+
+# エピソードタイプ分類（拡張版）
+EPISODE_TYPES = {
+    # ビジネス・実務経験
+    'アルバイト・接客': {
+        'keywords': [
+            'アルバイト', 'バイト', 'バイト先', 'アルバイト先',
+            '接客', '販売', '店舗', 'レストラン', 'カフェ', '飲食店',
+            'コンビニ', 'スーパー', '小売', 'ホール', 'レジ'
+        ],
+        'weight': 1.0,
+        'category': 'ビジネス経験'
+    },
+    'インターン・実務': {
+        'keywords': [
+            'インターン', 'インターンシップ', '長期インターン',
+            '実務', '実務経験', '職務経験', 'ビジネス経験',
+            'インターン先', 'インターン生'
+        ],
+        'weight': 1.0,
+        'category': 'ビジネス経験'
+    },
+    '起業・事業立ち上げ': {
+        'keywords': [
+            '起業', '創業', '事業', 'ビジネス',
+            '会社設立', '法人', '代表', '経営',
+            'スタートアップ', 'ベンチャー', '自営',
+            'サービス立ち上げ', '事業化', '商品開発'
+        ],
+        'weight': 1.0,
+        'category': 'ビジネス経験'
+    },
+
+    # 学術・研究活動
+    '研究・ゼミ活動': {
+        'keywords': [
+            '研究', 'ゼミ', 'ゼミナール', '実験',
+            '論文', '学会', '卒論', '修論',
+            '研究室', 'ラボ', '調査', '分析',
+            '考察', '仮説', 'データ', '検証'
+        ],
+        'weight': 1.0,
+        'category': '学術活動'
+    },
+    '資格取得・受験': {
+        'keywords': [
+            '資格', '検定', '試験', '合格',
+            '勉強', '受験', '学習', 'TOEIC',
+            'TOEFL', '簿記', '宅建', '公認会計士',
+            'FP', 'ソムリエ', '国家試験'
+        ],
+        'weight': 0.8,
+        'category': '学術活動'
+    },
+
+    # 課外活動
+    '部活動・体育会': {
+        'keywords': [
+            '部活', '部活動', '体育会', '運動部',
+            '練習', 'トレーニング', '大会', '試合',
+            '選手', 'キャプテン', '主将', 'レギュラー',
+            '全国大会', '地区大会', '県大会'
+        ],
+        'weight': 1.0,
+        'category': '課外活動'
+    },
+    'サークル活動': {
+        'keywords': [
+            'サークル', 'サークル活動', '同好会',
+            '文化系', '趣味', '愛好会',
+            'サークル代表', 'サークル長'
+        ],
+        'weight': 1.0,
+        'category': '課外活動'
+    },
+    '学生団体・NPO': {
+        'keywords': [
+            '学生団体', '団体', 'NPO', 'NGO',
+            'ボランティア', '社会貢献', '支援活動',
+            '地域活動', 'コミュニティ', '市民活動',
+            '学生組織', '代表', '運営'
+        ],
+        'weight': 1.0,
+        'category': '課外活動'
+    },
+
+    # 国際・語学経験
+    '留学・海外経験': {
+        'keywords': [
+            '留学', '海外', '海外経験', '海外留学',
+            '交換留学', '語学留学', '短期留学', '長期留学',
+            '海外インターン', 'ホームステイ', '海外ボランティア',
+            '現地', '異文化', '外国', '渡航',
+            # 主要国名
+            'アメリカ', '米国', 'USA', 'アメリカ合衆国',
+            'イギリス', '英国', 'UK', 'イングランド',
+            'カナダ', 'オーストラリア', '豪州',
+            '中国', '韓国', 'フランス', 'ドイツ',
+            'イタリア', 'スペイン', 'シンガポール',
+            'タイ', 'ベトナム', 'インド', 'フィリピン',
+            'マレーシア', 'インドネシア', 'ニュージーランド'
+        ],
+        'weight': 1.0,
+        'category': '国際経験'
+    },
+
+    # イベント・コンテスト
+    'コンテスト・大会': {
+        'keywords': [
+            'コンテスト', 'コンペ', 'コンペティション',
+            '大会', '競技会', 'ハッカソン',
+            'ビジネスコンテスト', 'プレゼン大会',
+            '入賞', '優勝', '受賞', '表彰'
+        ],
+        'weight': 1.0,
+        'category': 'イベント'
+    },
+
+    # 個人プロジェクト
+    '個人プロジェクト・趣味': {
+        'keywords': [
+            '個人', '趣味', 'プロジェクト', '制作',
+            'ポートフォリオ', 'アプリ開発', 'Web制作',
+            'ブログ', 'SNS', 'YouTube', '動画',
+            '作品', 'ハンドメイド', 'DIY'
+        ],
+        'weight': 0.8,
+        'category': '個人活動'
+    },
+
+    # 教育関連
+    '家庭教師・塾講師': {
+        'keywords': [
+            '家庭教師', '塾', '塾講師', '講師',
+            '指導', '教育', '生徒', '教える',
+            '授業', '添削', '進路指導'
+        ],
+        'weight': 1.0,
+        'category': 'ビジネス経験'
+    },
+
+    # その他
+    'その他の経験': {
+        'keywords': [],
+        'weight': 0.5,
+        'category': 'その他'
+    }
+}
+
+# FastAPIアプリケーションの初期化
+base_dir = os.path.dirname(os.path.abspath(__file__))
+template_dir = os.path.join(os.path.dirname(base_dir), 'templates')
+
+# FastAPIアプリの作成
+app = FastAPI(
+    title="ES診断ツール",
+    description="ES診断・企業マッチングAPI",
+    version="2.0.0"
+)
+
+# CORSミドルウェアの追加（必要に応じて）
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 本番環境では適切なオリジンを指定
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ============================================
+# Pydanticモデル（リクエスト/レスポンス）
+# ============================================
+
+class AnalyzeRequest(BaseModel):
+    esAnswers: List[str]
+    targetIndustry: str
+    university: Optional[str] = ""
+    targetCompanies: Optional[List[str]] = []
+    major: Optional[str] = ""
+    graduationYear: Optional[str] = ""
+    onlyAccepted: Optional[bool] = False  # 内定のみに絞るフィルター
+
+class SimilarityAnalysisRequest(BaseModel):
+    userES: str
+    similarES: str
+    question: Optional[str] = ""
+
+# ============================================
+# データ処理関数
+# ============================================
+
+def clean_text(text):
+    """テキストのクリーニング"""
+    if pd.isna(text):
+        return ""
+    text = re.sub(r'\n+', ' ', str(text))
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'続きを読む.*', '', text)
+    text = re.sub(r'問題を報告する.*', '', text)
+    return text.strip()
+
+def remove_prefix(text):
+    """プレフィックスを削除"""
+    if pd.isna(text):
+        return ""
+    return re.sub(r'^[^：]+：\s*', '', str(text))
+
+def extract_university(user_info):
+    """ユーザー情報から大学名を抽出"""
+    if pd.isna(user_info):
+        return "不明"
+    match = re.search(r'\d{2}卒\s*\|\s*([^|]+)\s*\|', str(user_info))
+    if match:
+        return match.group(1).strip()
+    return "不明"
+
+def extract_major_industry_category(industry):
+    """業界名から大分類を抽出"""
+    if pd.isna(industry) or not industry:
+        return None
+
+    industry_str = str(industry).strip()
+
+    # 大分類リストから一致するものを探す
+    for major_category in INDUSTRY_MAJOR_CATEGORIES:
+        if industry_str.startswith(major_category):
+            return major_category
+
+    return None
+
+def categorize_es_themes(text):
+    """ESのテーマをマルチラベルで判定"""
+    if pd.isna(text) or not text:
+        return []
+
+    text_str = str(text)
+    matched_themes = []
+
+    for theme_name, keywords in ES_THEME_CATEGORIES.items():
+        # キーワードマッチング
+        keyword_count = sum(1 for kw in keywords if kw in text_str)
+
+        # 閾値を超えたらテーマとして認定（2個以上）
+        if keyword_count >= 2:
+            matched_themes.append({
+                'theme': theme_name,
+                'score': keyword_count
+            })
+
+    # スコアでソート
+    matched_themes.sort(key=lambda x: x['score'], reverse=True)
+
+    return matched_themes if matched_themes else [{'theme': 'その他', 'score': 0}]
+
+def extract_strengths_and_weaknesses(text):
+    """
+    ESテキストから強み・弱みを抽出
+
+    Returns:
+        dict: {
+            'strengths': [強みのリスト],
+            'weaknesses': [弱みのリスト],
+            'strength_keywords': [マッチしたキーワード],
+            'weakness_keywords': [マッチしたキーワード]
+        }
+    """
+    if pd.isna(text) or not text:
+        return {
+            'strengths': [],
+            'weaknesses': [],
+            'strength_keywords': [],
+            'weakness_keywords': []
+        }
+
+    text_str = str(text)
+
+    # 強みのカテゴリ定義
+    STRENGTH_CATEGORIES = {
+        '行動力・実行力': ['行動力', '実行力', '有言実行', '実行する', '行動する', '動く', '実践', 'やり遂げる', '成し遂げる'],
+        'コミュニケーション力': ['コミュニケーション', '説明', '伝える', '話す', 'プレゼン', '対話', '傾聴', '聞く'],
+        'リーダーシップ': ['リーダーシップ', 'リーダー', '統率', '率いる', '導く', 'まとめる', '引っ張る'],
+        '課題解決力': ['課題解決', '問題解決', '解決力', '分析', '改善', '工夫', '対策'],
+        '粘り強さ・継続力': ['粘り強い', '継続', '諦めない', 'やり抜く', '最後まで', '根気'],
+        '協調性・チームワーク': ['協調性', 'チームワーク', '協力', '連携', '協働', 'サポート'],
+        '創造性・発想力': ['創造', '発想', 'アイデア', '企画', '新しい', '斬新', '独創'],
+        '計画性・緻密さ': ['計画', '緻密', '細かい', '丁寧', '正確', '几帳面', '段取り'],
+        '挑戦心・向上心': ['挑戦', '向上心', 'チャレンジ', '成長', '学ぶ', '吸収'],
+        '柔軟性・適応力': ['柔軟', '適応', '対応', '臨機応変', '変化', '順応'],
+        '責任感': ['責任感', '責任', '誠実', '真摯', 'やり遂げる'],
+    }
+
+    # 弱みのカテゴリ定義
+    WEAKNESS_CATEGORIES = {
+        '突っ走る・周りが見えない': ['突っ走', '周りを気にせず', '一人で進', '周りが見えない', '置いてい'],
+        '心配性・慎重すぎる': ['心配性', '慎重すぎ', '考えすぎ', '不安', '躊躇'],
+        'せっかち': ['せっかち', '焦る', '急ぐ', '待てない'],
+        '完璧主義': ['完璧主義', '完璧', '細かい', '妥協できない'],
+        '人に頼れない': ['頼れない', '一人で抱え', '相談できない', '自分で'],
+        '優柔不断': ['優柔不断', '決められない', '迷う', '決断が遅い'],
+        '計画性がない': ['計画性がない', '行き当たり', '無計画'],
+    }
+
+    # 強みを抽出
+    matched_strengths = []
+    strength_keywords = []
+    for category, keywords in STRENGTH_CATEGORIES.items():
+        matched = [kw for kw in keywords if kw in text_str]
+        if matched:
+            matched_strengths.append(category)
+            strength_keywords.extend(matched)
+
+    # 弱みを抽出
+    matched_weaknesses = []
+    weakness_keywords = []
+    for category, keywords in WEAKNESS_CATEGORIES.items():
+        matched = [kw for kw in keywords if kw in text_str]
+        if matched:
+            matched_weaknesses.append(category)
+            weakness_keywords.extend(matched)
+
+    return {
+        'strengths': matched_strengths,
+        'weaknesses': matched_weaknesses,
+        'strength_keywords': strength_keywords,
+        'weakness_keywords': weakness_keywords
+    }
+
+def extract_theme_keywords_for_weighting(text):
+    """重要キーワードに重み付けしたテキストを生成"""
+    if pd.isna(text) or not text:
+        return str(text)
+
+    text_str = str(text)
+    weighted_text = text_str
+
+    # テーマ別に重要キーワードを抽出して重み付け
+    for theme_name, keywords in ES_THEME_CATEGORIES.items():
+        for keyword in keywords:
+            if keyword in text_str:
+                # キーワードを3回繰り返して重要度を上げる
+                weighted_text += f" {keyword} {keyword} {keyword}"
+
+    return weighted_text
+
+def analyze_es_structure(text):
+    """ESの構造を分析してスコアリング（STARフレームワーク）"""
+    if pd.isna(text) or not text:
+        return {
+            'situation': 0,
+            'task': 0,
+            'action': 0,
+            'result': 0,
+            'learning': 0
+        }
+
+    text_str = str(text)
+
+    structure_features = {
+        'situation': 0,  # 状況説明
+        'task': 0,       # 課題・目標
+        'action': 0,     # 具体的行動
+        'result': 0,     # 成果・結果
+        'learning': 0    # 学び
+    }
+
+    # 状況説明の検出
+    situation_keywords = ['において', 'で', 'に所属', 'に参加', '当時', 'では', 'として']
+    structure_features['situation'] = sum(1 for kw in situation_keywords if kw in text_str)
+
+    # 課題・目標の検出
+    task_keywords = ['目標', '課題', 'したい', 'を目指', '改善', '向上', '問題', '必要']
+    structure_features['task'] = sum(1 for kw in task_keywords if kw in text_str)
+
+    # 具体的行動の検出
+    action_keywords = ['私は', '取り組んだ', '実施', '工夫', '提案', '導入', '行った', '考えた']
+    structure_features['action'] = sum(1 for kw in action_keywords if kw in text_str)
+
+    # 成果の検出
+    result_keywords = ['結果', '達成', '向上', '%', '増加', '成功', '実現', '完成']
+    structure_features['result'] = sum(1 for kw in result_keywords if kw in text_str)
+
+    # 学びの検出
+    learning_keywords = ['学んだ', '得た', '身につけた', '気づいた', '経験から', '理解した', '成長']
+    structure_features['learning'] = sum(1 for kw in learning_keywords if kw in text_str)
+
+    return structure_features
+
+def classify_episode_type(text):
+    """
+    ESテキストからエピソードタイプを判定
+
+    Args:
+        text (str): ES本文
+
+    Returns:
+        dict: {
+            'type': エピソードタイプ名,
+            'confidence': 信頼度（マッチしたキーワード数）,
+            'matched_keywords': マッチしたキーワードリスト
+        }
+    """
+    if pd.isna(text) or not text:
+        return {
+            'type': 'その他の経験',
+            'confidence': 0,
+            'matched_keywords': []
+        }
+
+    text_str = str(text)
+
+    # 各エピソードタイプでマッチング
+    episode_scores = []
+
+    for episode_type, config in EPISODE_TYPES.items():
+        keywords = config['keywords']
+        weight = config['weight']
+
+        # マッチしたキーワードをカウント
+        matched_keywords = [kw for kw in keywords if kw in text_str]
+        match_count = len(matched_keywords)
+
+        if match_count > 0:
+            # スコア = マッチ数 × 重み
+            score = match_count * weight
+            episode_scores.append({
+                'type': episode_type,
+                'score': score,
+                'confidence': match_count,
+                'matched_keywords': matched_keywords[:5]  # 最大5個まで
+            })
+
+    # スコアが最も高いものを返す
+    if episode_scores:
+        best_match = max(episode_scores, key=lambda x: x['score'])
+        return {
+            'type': best_match['type'],
+            'confidence': best_match['confidence'],
+            'matched_keywords': best_match['matched_keywords']
+        }
+
+    # マッチしない場合
+    return {
+        'type': 'その他の経験',
+        'confidence': 0,
+        'matched_keywords': []
+    }
+
+def classify_multiple_episode_types(text, top_n=2):
+    """
+    複数のエピソードタイプを返す（マルチラベル対応）
+
+    Args:
+        text (str): ES本文
+        top_n (int): 返すエピソードタイプの最大数
+
+    Returns:
+        list: エピソードタイプのリスト
+    """
+    if pd.isna(text) or not text:
+        return [{'type': 'その他の経験', 'confidence': 0}]
+
+    text_str = str(text)
+
+    episode_scores = []
+
+    for episode_type, config in EPISODE_TYPES.items():
+        keywords = config['keywords']
+        weight = config['weight']
+
+        matched_keywords = [kw for kw in keywords if kw in text_str]
+        match_count = len(matched_keywords)
+
+        if match_count > 0:
+            score = match_count * weight
+            episode_scores.append({
+                'type': episode_type,
+                'score': score,
+                'confidence': match_count
+            })
+
+    # スコア順にソート
+    episode_scores.sort(key=lambda x: x['score'], reverse=True)
+
+    # 上位top_nを返す
+    if episode_scores:
+        return episode_scores[:top_n]
+
+    return [{'type': 'その他の経験', 'confidence': 0}]
+
+def extract_quantitative_achievement_score(text):
+    """
+    定量的成果のスコアを計算（網羅的パターン対応）
+
+    Args:
+        text (str): ES本文
+
+    Returns:
+        float: 成果スコア（0.0〜1.0）
+    """
+    if pd.isna(text) or not text:
+        return 0.0
+
+    text_str = str(text)
+    score = 0.0
+
+    # ============================================
+    # カテゴリ1: パーセンテージ系（最重要）
+    # ============================================
+
+    # パターン1-1: ◯%向上/増加/改善/達成/上昇
+    percentage_positive = re.findall(
+        r'(\d+(?:\.\d+)?)%?(?:％)?(?:向上|増加|改善|達成|上昇|伸び|アップ|UP|成長|拡大|上がった|高まった)',
+        text_str
+    )
+    for match in percentage_positive:
+        value = float(match)
+        if value >= 100:
+            score += 0.35  # 100%以上（2倍以上）
+        elif value >= 50:
+            score += 0.30  # 50-100%
+        elif value >= 30:
+            score += 0.25  # 30-50%
+        elif value >= 20:
+            score += 0.20  # 20-30%
+        elif value >= 10:
+            score += 0.15  # 10-20%
+        elif value >= 5:
+            score += 0.10  # 5-10%
+        else:
+            score += 0.05  # 5%未満
+
+    # パターン1-2: ◯%削減/減少/短縮（コスト削減・効率化）
+    percentage_reduction = re.findall(
+        r'(\d+(?:\.\d+)?)%?(?:％)?(?:削減|減少|短縮|カット|削った|減らした|低減)',
+        text_str
+    )
+    for match in percentage_reduction:
+        value = float(match)
+        if value >= 50:
+            score += 0.30
+        elif value >= 30:
+            score += 0.25
+        elif value >= 20:
+            score += 0.20
+        elif value >= 10:
+            score += 0.15
+        else:
+            score += 0.10
+
+    # パターン1-3: ◯ポイント向上（満足度など）
+    point_increase = re.findall(
+        r'(\d+(?:\.\d+)?)(?:ポイント|pt|点)(?:向上|上昇|アップ|増加|改善)',
+        text_str
+    )
+    for match in point_increase:
+        value = float(match)
+        if value >= 20:
+            score += 0.25
+        elif value >= 10:
+            score += 0.20
+        elif value >= 5:
+            score += 0.15
+        else:
+            score += 0.10
+
+    # ============================================
+    # カテゴリ2: 倍数系
+    # ============================================
+
+    # パターン2-1: ◯倍
+    multiplier = re.findall(r'(\d+(?:\.\d+)?)倍', text_str)
+    for match in multiplier:
+        value = float(match)
+        if value >= 5:
+            score += 0.35  # 5倍以上
+        elif value >= 3:
+            score += 0.30  # 3-5倍
+        elif value >= 2:
+            score += 0.25  # 2-3倍
+        else:
+            score += 0.15  # 2倍未満
+
+    # ============================================
+    # カテゴリ3: 人数・規模系
+    # ============================================
+
+    # パターン3-1: ◯人（対象者数）
+    people_patterns = [
+        r'(\d+)人(?:以上)?(?:の|を|に|へ)?(?:生徒|学生|社員|メンバー|顧客|お客様|参加者|受講者)',
+        r'(?:生徒|学生|社員|メンバー|顧客|お客様|参加者|受講者)(?:数)?(?:が)?(\d+)人',
+        r'(\d+)名(?:の|を|に|へ)?(?:生徒|学生|社員|メンバー|顧客|お客様|参加者|受講者)',
+    ]
+
+    for pattern in people_patterns:
+        people_matches = re.findall(pattern, text_str)
+        for match in people_matches:
+            value = int(match)
+            if value >= 200:
+                score += 0.25  # 200人以上
+            elif value >= 100:
+                score += 0.20  # 100-200人
+            elif value >= 50:
+                score += 0.15  # 50-100人
+            elif value >= 20:
+                score += 0.10  # 20-50人
+            elif value >= 10:
+                score += 0.08  # 10-20人
+            else:
+                score += 0.05  # 10人未満
+
+    # パターン3-2: チーム規模
+    team_patterns = re.findall(r'(\d+)人(?:チーム|のチーム|規模|体制|メンバー構成)', text_str)
+    for match in team_patterns:
+        value = int(match)
+        if value >= 20:
+            score += 0.15
+        elif value >= 10:
+            score += 0.12
+        elif value >= 5:
+            score += 0.10
+
+    # ============================================
+    # カテゴリ4: 金額系
+    # ============================================
+
+    # パターン4-1: 売上・利益
+    money_patterns = [
+        r'(\d+)(?:万|億)?円(?:の)?(?:売上|売り上げ|利益|収益|収入)',
+        r'(?:売上|売り上げ|利益|収益|収入)(?:が)?(\d+)(?:万|億)?円',
+        r'(\d+)(?:万|億)(?:円)?(?:の)?(?:売上|売り上げ|利益|収益|収入)',
+    ]
+
+    has_money_achievement = False
+    for pattern in money_patterns:
+        money_matches = re.findall(pattern, text_str)
+        if money_matches:
+            has_money_achievement = True
+            score += 0.20  # 金額を伴う成果
+            break
+
+    # パターン4-2: コスト削減
+    cost_reduction = re.findall(
+        r'(\d+)(?:万|億)?円(?:の)?(?:削減|コスト削減|経費削減|節約)',
+        text_str
+    )
+    if cost_reduction:
+        score += 0.20
+
+    # ============================================
+    # カテゴリ5: 順位・ランキング系
+    # ============================================
+
+    # パターン5-1: 順位
+    ranking_patterns = [
+        r'(?:第)?([1-3])位(?:を)?(?:獲得|達成|入賞)',
+        r'([1-3])位(?:に)?(?:なった|なり|入った)',
+        r'(?:全国|地区|県|市|学内)(?:で)?([1-3])位',
+    ]
+
+    for pattern in ranking_patterns:
+        ranking_matches = re.findall(pattern, text_str)
+        for match in ranking_matches:
+            rank = int(match)
+            if rank == 1:
+                score += 0.30  # 1位
+            elif rank == 2:
+                score += 0.20  # 2位
+            elif rank == 3:
+                score += 0.15  # 3位
+
+    # パターン5-2: トップ
+    if re.search(r'(?:トップ|TOP|No\.1|ナンバーワン)', text_str):
+        score += 0.25
+
+    # パターン5-3: 優勝・入賞
+    awards = re.findall(
+        r'(?:優勝|準優勝|入賞|受賞|表彰|金賞|銀賞|銅賞|最優秀賞|優秀賞)',
+        text_str
+    )
+    if '優勝' in awards:
+        score += 0.30
+    elif '準優勝' in awards or '金賞' in awards or '最優秀賞' in awards:
+        score += 0.25
+    elif awards:
+        score += 0.15
+
+    # ============================================
+    # カテゴリ6: 目標達成系
+    # ============================================
+
+    # パターン6-1: 目標達成率
+    achievement_rate = re.findall(
+        r'(?:目標)?(?:達成率)(?:が)?(\d+(?:\.\d+)?)%',
+        text_str
+    )
+    for match in achievement_rate:
+        value = float(match)
+        if value >= 120:
+            score += 0.25  # 120%以上達成
+        elif value >= 100:
+            score += 0.20  # 100%達成
+        elif value >= 80:
+            score += 0.10  # 80%以上
+
+    # パターン6-2: 目標達成（定性的）
+    if re.search(r'目標(?:を)?(?:達成|クリア|突破|超え)', text_str):
+        score += 0.15
+
+    # ============================================
+    # カテゴリ7: 期間・頻度系
+    # ============================================
+
+    # パターン7-1: 連続記録
+    consecutive = re.findall(
+        r'(\d+)(?:ヶ月|か月|ヵ月|カ月|年|週)(?:連続|継続)',
+        text_str
+    )
+    for match in consecutive:
+        value = int(match)
+        if value >= 12:
+            score += 0.20  # 12ヶ月以上連続
+        elif value >= 6:
+            score += 0.15  # 6-12ヶ月連続
+        elif value >= 3:
+            score += 0.10  # 3-6ヶ月連続
+
+    # パターン7-2: 期間内での成果
+    time_based = re.findall(
+        r'(\d+)(?:ヶ月|か月|週間|日)(?:で|以内に)(?:達成|実現|完成|完了)',
+        text_str
+    )
+    if time_based:
+        score += 0.10  # 期限を意識した成果
+
+    # ============================================
+    # カテゴリ8: その他の定量的表現
+    # ============================================
+
+    # パターン8-1: 満足度スコア
+    satisfaction_score = re.findall(
+        r'(?:満足度|評価)(?:が)?(\d+(?:\.\d+)?)(?:点|/10|/5)',
+        text_str
+    )
+    if satisfaction_score:
+        score += 0.15
+
+    # パターン8-2: 参加者数・応募者数
+    participant_numbers = re.findall(
+        r'(\d+)人(?:が|の)?(?:参加|応募|エントリー|集まった)',
+        text_str
+    )
+    for match in participant_numbers:
+        value = int(match)
+        if value >= 100:
+            score += 0.15
+        elif value >= 50:
+            score += 0.12
+        elif value >= 20:
+            score += 0.10
+
+    # パターン8-3: 回数・頻度
+    frequency = re.findall(
+        r'(\d+)回(?:以上)?(?:実施|開催|実行|達成)',
+        text_str
+    )
+    for match in frequency:
+        value = int(match)
+        if value >= 50:
+            score += 0.15
+        elif value >= 20:
+            score += 0.12
+        elif value >= 10:
+            score += 0.10
+
+    # パターン8-4: 合格率・成功率
+    success_rate = re.findall(
+        r'(?:合格率|成功率|達成率)(?:が)?(\d+(?:\.\d+)?)%',
+        text_str
+    )
+    if success_rate:
+        score += 0.15
+
+    # ============================================
+    # 最終調整
+    # ============================================
+
+    # スコアの上限を1.0に制限
+    final_score = min(score, 1.0)
+
+    return final_score
+
+def calculate_detail_score(text):
+    """
+    文章の詳細度を評価（網羅的評価基準）
+
+    Args:
+        text (str): ES本文
+
+    Returns:
+        float: 詳細度スコア（0.0〜1.0）
+    """
+    if pd.isna(text) or not text:
+        return 0.0
+
+    text_str = str(text)
+    score = 0.0
+
+    # ============================================
+    # カテゴリ1: 論理展開・接続詞（最重要）
+    # ============================================
+
+    # 論理展開の接続詞
+    logical_connectors = {
+        # 因果関係
+        'そのため': 0.08,
+        'したがって': 0.08,
+        'その結果': 0.08,
+        'これにより': 0.08,
+        'よって': 0.06,
+        'ゆえに': 0.06,
+
+        # 対比・逆接
+        'しかし': 0.07,
+        'ところが': 0.07,
+        '一方で': 0.07,
+        'だが': 0.05,
+        'けれども': 0.05,
+
+        # 追加・並列
+        'また': 0.04,
+        'さらに': 0.06,
+        '加えて': 0.06,
+        'そして': 0.03,
+
+        # 具体化
+        '具体的には': 0.10,
+        '例えば': 0.09,
+        '実際に': 0.08,
+        '特に': 0.06,
+
+        # 順序
+        'まず': 0.07,
+        '次に': 0.07,
+        '最後に': 0.07,
+        '第一に': 0.08,
+        '第二に': 0.08,
+        '初めに': 0.06,
+        'その後': 0.05,
+
+        # 補足・説明
+        'なぜなら': 0.08,
+        'つまり': 0.07,
+        'すなわち': 0.07,
+        'というのは': 0.06,
+    }
+
+    for connector, weight in logical_connectors.items():
+        if connector in text_str:
+            score += weight
+
+    # ============================================
+    # カテゴリ2: 具体性の指標
+    # ============================================
+
+    # パターン2-1: 固有名詞（カタカナ語）
+    katakana_words = re.findall(r'[ァ-ヴー]{3,}', text_str)
+    unique_katakana = set(katakana_words)
+
+    # カタカナ語の数に応じてスコア
+    if len(unique_katakana) >= 10:
+        score += 0.15
+    elif len(unique_katakana) >= 7:
+        score += 0.12
+    elif len(unique_katakana) >= 5:
+        score += 0.10
+    elif len(unique_katakana) >= 3:
+        score += 0.08
+    elif len(unique_katakana) >= 1:
+        score += 0.05
+
+    # パターン2-2: ツール・システム名
+    tools_and_systems = [
+        'Excel', 'Word', 'PowerPoint', 'Slack', 'Teams', 'Zoom',
+        'Google', 'Notion', 'Trello', 'Asana', 'Salesforce',
+        'Python', 'JavaScript', 'SQL', 'GitHub', 'AWS',
+        'LINE', 'Instagram', 'Twitter', 'Facebook', 'YouTube'
+    ]
+
+    tool_mentions = sum(1 for tool in tools_and_systems if tool in text_str)
+    score += min(tool_mentions * 0.05, 0.15)
+
+    # パターン2-3: 具体的な手法・フレームワーク
+    methodologies = [
+        'PDCA', 'KPI', 'KGI', 'SWOT', 'PEST', '5W1H',
+        'ロジックツリー', 'マインドマップ', 'ガントチャート',
+        'ブレインストーミング', 'アンケート', 'ヒアリング'
+    ]
+
+    methodology_mentions = sum(1 for method in methodologies if method in text_str)
+    score += min(methodology_mentions * 0.06, 0.18)
+
+    # ============================================
+    # カテゴリ3: 数値の多様性
+    # ============================================
+
+    # 数値の種類数
+    numbers = re.findall(r'\d+(?:\.\d+)?', text_str)
+    unique_numbers = set(numbers)
+
+    if len(unique_numbers) >= 10:
+        score += 0.15
+    elif len(unique_numbers) >= 7:
+        score += 0.12
+    elif len(unique_numbers) >= 5:
+        score += 0.10
+    elif len(unique_numbers) >= 3:
+        score += 0.08
+    elif len(unique_numbers) >= 1:
+        score += 0.05
+
+    # ============================================
+    # カテゴリ4: 問題解決の構造
+    # ============================================
+
+    # パターン4-1: 課題認識
+    problem_awareness = [
+        '課題', '問題', '困難', '障壁', 'ネック', 'ボトルネック',
+        '不足', '欠如', '低下', '悪化', '停滞'
+    ]
+    problem_count = sum(1 for word in problem_awareness if word in text_str)
+    score += min(problem_count * 0.04, 0.12)
+
+    # パターン4-2: 原因分析
+    cause_analysis = [
+        '原因', '要因', '背景', '理由', 'なぜ', '分析',
+        '仮説', '推測', '考察', '洞察'
+    ]
+    cause_count = sum(1 for word in cause_analysis if word in text_str)
+    score += min(cause_count * 0.05, 0.15)
+
+    # パターン4-3: 解決策
+    solution_words = [
+        '解決', '対策', '施策', '改善策', '工夫', '取り組み',
+        '実施', '導入', '提案', 'アプローチ'
+    ]
+    solution_count = sum(1 for word in solution_words if word in text_str)
+    score += min(solution_count * 0.04, 0.12)
+
+    # ============================================
+    # カテゴリ5: 引用・参照
+    # ============================================
+
+    # パターン5-1: 引用符の使用
+    quotation_patterns = [
+        r'「[^」]{5,}」',  # 日本語引用符
+        r'『[^』]{5,}』',  # 日本語二重引用符
+    ]
+
+    quotation_count = 0
+    for pattern in quotation_patterns:
+        quotation_count += len(re.findall(pattern, text_str))
+
+    score += min(quotation_count * 0.05, 0.15)
+
+    # ============================================
+    # カテゴリ6: 視点の多様性
+    # ============================================
+
+    # パターン6-1: 主体の明示
+    subjects = ['私は', '私が', '自分は', '自分が']
+    subject_count = sum(text_str.count(subject) for subject in subjects)
+    score += min(subject_count * 0.02, 0.10)
+
+    # パターン6-2: 他者への言及
+    others = [
+        'メンバー', 'チーム', '同僚', '上司', '先輩', '後輩',
+        '顧客', 'お客様', '生徒', '学生', '参加者'
+    ]
+    others_count = sum(1 for word in others if word in text_str)
+    score += min(others_count * 0.03, 0.12)
+
+    # ============================================
+    # カテゴリ7: 時間軸の明示
+    # ============================================
+
+    # 時間表現
+    time_expressions = [
+        '当初', '初めは', '最初は', '開始時',
+        '途中で', '過程で', 'プロセスで',
+        '最終的に', '結果的に', '最後に',
+        '現在', '今後', '将来'
+    ]
+
+    time_count = sum(1 for expr in time_expressions if expr in text_str)
+    score += min(time_count * 0.04, 0.12)
+
+    # ============================================
+    # カテゴリ8: 文章の長さ（適度な詳しさ）
+    # ============================================
+
+    length = len(text_str)
+
+    # 最適な長さに対してボーナス
+    if 500 <= length <= 800:
+        score += 0.12  # 理想的な長さ
+    elif 400 <= length < 500 or 800 < length <= 1000:
+        score += 0.08  # やや良い長さ
+    elif 300 <= length < 400 or 1000 < length <= 1200:
+        score += 0.05  # 許容範囲
+    # 200文字未満または1200文字超はボーナスなし
+
+    # ============================================
+    # カテゴリ9: 文の多様性
+    # ============================================
+
+    # 句点の数（文の数の目安）
+    sentences = text_str.count('。')
+
+    # 1文あたりの平均文字数
+    avg_sentence_length = length / sentences if sentences > 0 else 0
+
+    # 適度な文の長さ（40-80文字が理想）
+    if 40 <= avg_sentence_length <= 80:
+        score += 0.10
+    elif 30 <= avg_sentence_length < 40 or 80 < avg_sentence_length <= 100:
+        score += 0.05
+
+    # ============================================
+    # カテゴリ10: 専門用語・業界用語
+    # ============================================
+
+    # 専門用語リスト（業界別）
+    technical_terms = [
+        # ビジネス一般
+        'ROI', 'ROAS', 'LTV', 'CAC', 'CRM', 'BtoB', 'BtoC',
+        'マーケティング', 'ブランディング', 'プロモーション',
+
+        # 教育
+        'カリキュラム', 'シラバス', 'アクティブラーニング',
+        '偏差値', '模試', '受験',
+
+        # IT
+        'アルゴリズム', 'データベース', 'API', 'UI', 'UX',
+        'フロントエンド', 'バックエンド',
+
+        # 研究
+        '仮説検証', '実証研究', 'エビデンス', '先行研究',
+    ]
+
+    technical_count = sum(1 for term in technical_terms if term in text_str)
+    score += min(technical_count * 0.04, 0.12)
+
+    # ============================================
+    # 最終調整
+    # ============================================
+
+    # スコアの上限を1.0に制限
+    final_score = min(score, 1.0)
+
+    return final_score
+
+def load_csv_data(csv_path):
+    """CSVデータを読み込んで整形"""
+    global es_data, vectorizer, tfidf_matrix, sentence_model
+
+    print(f"\n📂 CSVデータを読み込み中: {csv_path}")
+    df = pd.read_csv(csv_path)
+    print(f"✅ {len(df)}件のデータを読み込みました")
+
+    # 🆕 データソース別の統計を表示
+    if 'data_source' in df.columns:
+        print("\n📊 データソース別の内訳:")
+        source_counts = df['data_source'].value_counts()
+        for source, count in source_counts.items():
+            print(f"  - {source}: {count}件")
+
+    print("🔧 データ整形中...")
+
+    es_data = pd.DataFrame({
+        'company_name': df['p-company-summary__name'].apply(clean_text),
+        'industry': df['p-company-summary__stage-sub'].apply(remove_prefix),
+        'title': df['p-company-heading-contents__title'].apply(clean_text),
+        'user_info': df.get('c-panel-variant2__header-user', pd.Series()).apply(clean_text),
+        'question_1': df['u-font-light'].apply(clean_text),
+        'answer_1': df['c-show-more__content'].apply(clean_text),
+        'question_2': df.get('u-font-light (2)', pd.Series()).apply(clean_text),
+        'answer_2': df.get('c-show-more__content (2)', pd.Series()).apply(clean_text),
+        'question_3': df.get('u-font-light (3)', pd.Series()).apply(clean_text),
+        'answer_3': df.get('c-show-more__content (3)', pd.Series()).apply(clean_text),
+        'avg_salary': df.get('p-company-table (11)', pd.Series()).apply(clean_text),
+        'employee_count': df.get('p-company-summary__stage-sub (3)', pd.Series()).apply(remove_prefix),
+        # 🆕 データソース情報を保持
+        'data_source': df.get('data_source', pd.Series(dtype='object')),
+        'original_url': df.get('original_url', pd.Series(dtype='object'))
+    })
+
+    es_data['university'] = es_data['user_info'].apply(extract_university)
+
+    es_data['result_status'] = es_data['title'].apply(
+        lambda x: '内定' if '内定' in str(x) else ('通過' if '通過' in str(x) else '不明')
+    )
+
+    es_data = es_data[es_data['result_status'].isin(['通過', '内定'])]
+
+    es_data['combined_answer'] = (
+        es_data['answer_1'].fillna('') + ' ' +
+        es_data['answer_2'].fillna('') + ' ' +
+        es_data['answer_3'].fillna('')
+    ).str.strip()
+
+    es_data = es_data[es_data['combined_answer'].str.len() > 50]
+
+    print(f"✅ 有効なESデータ: {len(es_data)}件")
+
+    # テーマカテゴリ分析を追加
+    print("🔧 ESのテーマ分析中...")
+    es_data['themes'] = es_data['combined_answer'].apply(categorize_es_themes)
+
+    # エピソードタイプ分析を追加
+    print("🔧 エピソードタイプ分析中...")
+    es_data['episode_type'] = es_data['combined_answer'].apply(classify_episode_type)
+    es_data['episode_types_multi'] = es_data['combined_answer'].apply(
+        lambda x: classify_multiple_episode_types(x, top_n=2)
+    )
+
+    # 強み・弱みの抽出を追加
+    print("🔧 強み・弱み分析中...")
+    es_data['strengths_weaknesses'] = es_data['combined_answer'].apply(extract_strengths_and_weaknesses)
+
+    # エピソードタイプの統計を出力
+    episode_type_counts = {}
+    for episode_info in es_data['episode_type']:
+        episode_type = episode_info['type']
+        episode_type_counts[episode_type] = episode_type_counts.get(episode_type, 0) + 1
+
+    print("\n📊 エピソードタイプ別の分布:")
+    for episode_type, count in sorted(episode_type_counts.items(), key=lambda x: x[1], reverse=True)[:10]:
+        print(f"  - {episode_type}: {count}件")
+
+    # 重要キーワードの重み付けテキストを生成
+    print("\n🔧 キーワード重み付け中...")
+    es_data['weighted_answer'] = es_data['combined_answer'].apply(extract_theme_keywords_for_weighting)
+
+    print("🔧 TF-IDFベクトル化中（最適化済みパラメータ）...")
+    vectorizer = TfidfVectorizer(
+        max_features=3000,  # 1000 → 3000に増加
+        min_df=2,
+        max_df=0.8,
+        ngram_range=(1, 3)  # (1,2) → (1,3)に拡張
+    )
+
+    # 重み付けされたテキストを使用してベクトル化
+    tfidf_matrix = vectorizer.fit_transform(es_data['weighted_answer'])
+    print(f"✅ ベクトル化完了: {tfidf_matrix.shape}")
+
+    # ============================================
+    # セマンティックエンベディング生成（Sentence-BERT）
+    # ============================================
+    print("🔧 セマンティックエンベディング生成中...")
+    try:
+        from sentence_transformers import SentenceTransformer
+        import time
+
+        # tqdmのインポート（進捗表示用）
+        try:
+            from tqdm import tqdm
+            has_tqdm = True
+        except ImportError:
+            print("  ⚠️ tqdmがインストールされていません。進捗表示なしで実行します。")
+            has_tqdm = False
+
+        # 1. モデルのロード
+        if sentence_model is None:
+            print("  📥 セマンティックモデルをダウンロード中...")
+            # E5-Largeモデルを使用（1024次元、高精度）
+            sentence_model = SentenceTransformer('intfloat/multilingual-e5-large')
+
+            # GPU対応（利用可能な場合）
+            try:
+                import torch
+                device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                print(f"  🖥️  使用デバイス: {device}")
+                sentence_model = sentence_model.to(device)
+            except ImportError:
+                print("  🖥️  使用デバイス: cpu")
+
+            print("  ✅ モデルロード完了")
+
+        # 2. まず100件でテスト（所要時間の予測）
+        print("\n  🧪 テスト: 最初の100件を処理して所要時間を予測...")
+        test_start = time.time()
+        test_count = min(100, len(es_data))
+        test_texts = es_data['weighted_answer'].head(test_count).apply(lambda x: str(x)[:512]).tolist()
+        test_embeddings = sentence_model.encode(
+            test_texts,
+            convert_to_tensor=False,
+            show_progress_bar=False,
+            batch_size=32
+        )
+        test_time = time.time() - test_start
+
+        estimated_total_time = (test_time / test_count) * len(es_data)
+        print(f"  ⏱️  {test_count}件の処理時間: {test_time:.2f}秒")
+        print(f"  📊 予想所要時間: {estimated_total_time / 60:.1f}分")
+
+        # 3. 全データをバッチ処理
+        print(f"\n  🚀 全データのエンベディング生成中（{len(es_data)}件）...")
+
+        # テキストを一括で準備（長さ制限を512文字に）
+        all_texts = es_data['weighted_answer'].apply(lambda x: str(x)[:512]).tolist()
+
+        # バッチサイズの設定
+        batch_size = 32  # CPUの場合は16-32が最適
+        all_embeddings = []
+
+        # バッチ処理ループ
+        batch_range = range(0, len(all_texts), batch_size)
+        if has_tqdm:
+            batch_range = tqdm(batch_range, desc="  エンベディング生成")
+
+        for i in batch_range:
+            batch_texts = all_texts[i:i+batch_size]
+
+            # バッチで一気にエンコード
+            batch_embeddings = sentence_model.encode(
+                batch_texts,
+                convert_to_tensor=False,
+                show_progress_bar=False,
+                batch_size=batch_size
+            )
+
+            # リストに追加
+            if isinstance(batch_embeddings, list):
+                all_embeddings.extend(batch_embeddings)
+            else:
+                # numpyアレイの場合
+                all_embeddings.extend(batch_embeddings.tolist() if hasattr(batch_embeddings, 'tolist') else list(batch_embeddings))
+
+        # 4. DataFrameに格納
+        es_data['semantic_embedding'] = all_embeddings
+
+        # 5. 結果確認
+        print(f"\n  ✅ セマンティックエンベディング完了（{len(all_embeddings)}件）")
+        if len(all_embeddings) > 0:
+            first_embedding = all_embeddings[0]
+            if hasattr(first_embedding, '__len__'):
+                print(f"  📏 エンベディング次元: {len(first_embedding)}")
+
+    except ImportError:
+        print("⚠️ sentence-transformersがインストールされていません。")
+        print("   pip install sentence-transformers でインストールしてください。")
+        print("   TF-IDFのみを使用します。")
+        es_data['semantic_embedding'] = None
+
+    except Exception as e:
+        print(f"⚠️ セマンティックエンベディング生成エラー: {e}")
+        import traceback
+        traceback.print_exc()
+        es_data['semantic_embedding'] = None
+
+    print("\n📊 データ統計:")
+    print(f"  - ユニーク企業数: {es_data['company_name'].nunique()}")
+    print(f"  - 業界数: {es_data['industry'].nunique()}")
+    print(f"  - 通過ES: {(es_data['result_status'] == '通過').sum()}件")
+    print(f"  - 内定ES: {(es_data['result_status'] == '内定').sum()}件")
+
+    # 選択肢を抽出
+    global universities_list, industries_list, companies_list, common_questions
+    global company_counts, industry_counts
+
+    print("\n📋 選択肢を抽出中...")
+
+    universities_list = sorted(es_data['university'].dropna().unique().tolist())
+    universities_list = [u for u in universities_list if u != "不明" and str(u).strip() != ""]
+
+    industries_list = sorted(es_data['industry'].dropna().unique().tolist())
+    industries_list = [i for i in industries_list if i and str(i).strip() != ""]
+
+    # 企業リストの処理を改善（前株企業も含める）
+    companies_list = es_data['company_name'].dropna().unique().tolist()
+    # 空文字や空白のみの企業名を除外（ただし、前株企業は保持）
+    companies_list = [c for c in companies_list if c and str(c).strip() != "" and len(str(c).strip()) > 1]
+    # ソート（日本語対応）
+    companies_list = sorted(companies_list, key=lambda x: str(x))
+
+    # 企業ごとのデータ件数をカウント
+    company_counts = es_data['company_name'].value_counts().to_dict()
+
+    # 業界ごとのデータ件数をカウント
+    industry_counts = es_data['industry'].value_counts().to_dict()
+
+    common_questions = [
+        "学生時代に力を入れたこと（ガクチカ）",
+        "志望動機",
+        "自己PR",
+        "あなたの強みとエピソード",
+        "挑戦したこと・チャレンジ",
+        "困難を乗り越えた経験",
+        "チームで成果を出した経験",
+        "リーダーシップを発揮した経験",
+        "インターンで学びたいこと",
+        "将来のキャリアビジョン"
+    ]
+
+    print(f"✅ 選択肢の抽出が完了しました")
+    print(f"  - 大学: {len(universities_list)}校")
+    print(f"  - 業界: {len(industries_list)}種類")
+    print(f"  - 企業: {len(companies_list)}社")
+
+def load_preprocessed_data(preprocessed_dir='es_preprocessed_data', csv_basename='unified_es_data'):
+    """前処理済みデータを読み込む（高速起動用）"""
+    global es_data, vectorizer, tfidf_matrix, sentence_model
+    global universities_list, industries_list, companies_list, common_questions
+    global company_counts, industry_counts
+
+    print(f"\n⚡ 前処理済みデータを読み込み中...")
+    print(f"📂 保存先: {preprocessed_dir}")
+
+    # 前処理済みデータのファイルパス
+    preprocessed_files = {
+        'es_data': os.path.join(preprocessed_dir, f'{csv_basename}_es_data.pkl'),
+        'tfidf_matrix': os.path.join(preprocessed_dir, f'{csv_basename}_tfidf_matrix.npz'),
+        'vectorizer': os.path.join(preprocessed_dir, f'{csv_basename}_vectorizer.pkl'),
+        'embeddings': os.path.join(preprocessed_dir, f'{csv_basename}_embeddings.npy')
+    }
+
+    # すべてのファイルが存在するかチェック
+    all_files_exist = all(os.path.exists(f) for f in preprocessed_files.values())
+
+    if not all_files_exist:
+        print("❌ 前処理済みデータが見つかりません")
+        print("💡 CSVから読み込む必要があります")
+        return False
+
+    try:
+        # es_dataを読み込み
+        with open(preprocessed_files['es_data'], 'rb') as f:
+            es_data = pickle.load(f)
+        print(f"  ✅ es_data: {len(es_data)}件")
+
+        # TF-IDF行列を読み込み
+        tfidf_matrix = sparse.load_npz(preprocessed_files['tfidf_matrix'])
+        print(f"  ✅ tfidf_matrix: {tfidf_matrix.shape}")
+
+        # Vectorizerを読み込み
+        with open(preprocessed_files['vectorizer'], 'rb') as f:
+            vectorizer = pickle.load(f)
+        print(f"  ✅ vectorizer")
+
+        # セマンティックエンベディングを読み込み
+        if os.path.exists(preprocessed_files['embeddings']):
+            # Sentence-BERTモデルをロード（エンベディング計算には不要だが、モデルは必要）
+            try:
+                from sentence_transformers import SentenceTransformer
+                if sentence_model is None:
+                    print("  📥 E5-Largeモデルをロード中...")
+                    sentence_model = SentenceTransformer('intfloat/multilingual-e5-large')
+                    print("  ✅ モデルロード完了")
+            except ImportError:
+                print("  ⚠️ sentence-transformersが利用できません。セマンティック検索は無効です。")
+
+            # エンベディングを読み込み
+            embeddings_array = np.load(preprocessed_files['embeddings'])
+            es_data['semantic_embedding'] = list(embeddings_array)
+            print(f"  ✅ semantic_embeddings: {len(es_data['semantic_embedding'])}件")
+
+        # 選択肢を抽出
+        universities_list = sorted(es_data['university'].dropna().unique().tolist())
+        universities_list = [u for u in universities_list if u != "不明" and str(u).strip() != ""]
+
+        industries_list = sorted(es_data['industry'].dropna().unique().tolist())
+        industries_list = [i for i in industries_list if i and str(i).strip() != ""]
+
+        companies_list = es_data['company_name'].dropna().unique().tolist()
+        companies_list = [c for c in companies_list if c and str(c).strip() != "" and len(str(c).strip()) > 1]
+        companies_list = sorted(companies_list, key=lambda x: str(x))
+
+        company_counts = es_data['company_name'].value_counts().to_dict()
+        industry_counts = es_data['industry'].value_counts().to_dict()
+
+        common_questions = [
+            "学生時代に力を入れたこと（ガクチカ）",
+            "志望動機",
+            "自己PR",
+            "あなたの強みとエピソード",
+            "挑戦したこと・チャレンジ",
+            "困難を乗り越えた経験",
+            "チームで成果を出した経験",
+            "リーダーシップを発揮した経験",
+            "インターンで学びたいこと",
+            "将来のキャリアビジョン"
+        ]
+
+        print(f"\n✅ 前処理済みデータの読み込みが完了しました")
+        print(f"  - 大学: {len(universities_list)}校")
+        print(f"  - 業界: {len(industries_list)}種類")
+        print(f"  - 企業: {len(companies_list)}社")
+
+        return True
+
+    except Exception as e:
+        print(f"❌ 前処理済みデータの読み込みに失敗しました: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def calculate_similarity(input_text, top_n=100):
+    """類似度計算（修正版：100%を超えないように調整）
+
+    ハイブリッド方式：TF-IDF + セマンティック + 構造分析 + テーマフィルタリング + 成果・詳細度 + エピソードタイプ
+    ボーナススコアは加算式で適用し、最終スコアは0.0〜1.0の範囲に制限
+
+    ボーナス内訳：
+    - テーマ一致: 最大+0.08
+    - 定量的成果一致: 最大+0.10
+    - 詳細度一致: 最大+0.08
+    - エピソードタイプ一致: 最大+0.08
+    """
+    # 入力テキストにも同じ重み付けを適用
+    weighted_input = extract_theme_keywords_for_weighting(input_text)
+
+    # TF-IDF類似度
+    input_vector = vectorizer.transform([weighted_input])
+    tfidf_similarities = cosine_similarity(input_vector, tfidf_matrix)[0]
+
+    # セマンティック類似度（BERT）
+    semantic_similarities = np.zeros(len(es_data))
+    has_semantic = False
+
+    try:
+        from sentence_transformers import SentenceTransformer
+
+        if sentence_model is not None and es_data['semantic_embedding'].iloc[0] is not None:
+            # 入力テキストのエンベディング生成
+            input_embedding = sentence_model.encode(str(input_text)[:512], convert_to_tensor=False)
+
+            # 全ESとの類似度計算
+            embeddings_matrix = np.vstack(es_data['semantic_embedding'].values)
+            semantic_similarities = cosine_similarity([input_embedding], embeddings_matrix)[0]
+            has_semantic = True
+    except Exception as e:
+        print(f"⚠️ セマンティック類似度計算をスキップ: {e}")
+
+    # ハイブリッドスコア（セマンティックが使える場合は重視）
+    if has_semantic:
+        combined_similarities = (
+            tfidf_similarities * 0.3 +      # キーワードマッチ
+            semantic_similarities * 0.7     # 意味マッチ
+        )
+    else:
+        combined_similarities = tfidf_similarities
+
+    # 構造分析による追加スコアリング
+    input_structure = analyze_es_structure(input_text)
+
+    result = es_data.copy()
+    result['similarity_score'] = combined_similarities
+
+    # 上位候補に対して構造類似度を計算
+    result = result.sort_values('similarity_score', ascending=False).head(top_n * 2)
+
+    # 構造類似度を追加
+    structure_scores = []
+    for idx, row in result.iterrows():
+        es_structure = analyze_es_structure(row['combined_answer'])
+
+        # 構造の一致度を計算
+        structure_similarity = sum(
+            min(input_structure[key], es_structure[key])
+            for key in input_structure.keys()
+        ) / max(sum(input_structure.values()), 1)
+
+        structure_scores.append(structure_similarity)
+
+    result['structure_score'] = structure_scores
+
+    # 最終スコア = 内容類似度 * 0.8 + 構造類似度 * 0.2
+    result['similarity_score'] = (
+        result['similarity_score'] * 0.8 +
+        result['structure_score'] * 0.2
+    )
+
+    # テーマフィルタリング強化
+    # 入力ESのテーマを抽出
+    input_themes = categorize_es_themes(input_text)
+    input_theme_names = set([t['theme'] for t in input_themes[:3]])  # 上位3テーマ
+
+    # 入力ESの特徴を事前計算
+    input_achievement = extract_quantitative_achievement_score(input_text)
+    input_detail = calculate_detail_score(input_text)
+    input_episode_info = classify_episode_type(input_text)
+    input_episode_type = input_episode_info['type']
+    input_episode_category = EPISODE_TYPES.get(input_episode_type, {}).get('category', 'その他')
+
+    # 強み・弱みを事前計算
+    input_sw = extract_strengths_and_weaknesses(input_text)
+    input_strengths = set(input_sw['strengths'])
+    input_weaknesses = set(input_sw['weaknesses'])
+
+    print("  🎯 ボーナススコアを計算中...")
+
+    # ============================================
+    # ボーナススコアの計算（加算式に変更）
+    # ============================================
+
+    for idx, row in result.iterrows():
+        base_score = row['similarity_score']
+        total_bonus = 0.0  # ボーナスの合計
+
+        # --------------------------------------------
+        # 1. テーマ一致ボーナス（最大+0.08）
+        # --------------------------------------------
+        es_themes = row['themes']
+        es_theme_names = set([t['theme'] for t in es_themes[:3]])
+        theme_overlap = len(input_theme_names & es_theme_names)
+
+        if theme_overlap >= 3:
+            total_bonus += 0.08  # 3つ一致
+        elif theme_overlap == 2:
+            total_bonus += 0.05  # 2つ一致
+        elif theme_overlap == 1:
+            total_bonus += 0.03  # 1つ一致
+
+        # --------------------------------------------
+        # 2. 定量的成果の一致度ボーナス（最大+0.10）
+        # --------------------------------------------
+        es_achievement = extract_quantitative_achievement_score(row['combined_answer'])
+
+        if input_achievement > 0.4 and es_achievement > 0.4:
+            total_bonus += 0.10  # 両方とも成果が強い
+        elif input_achievement > 0.2 and es_achievement > 0.2:
+            total_bonus += 0.06  # 両方とも成果がある
+        elif abs(input_achievement - es_achievement) < 0.15:
+            total_bonus += 0.04  # 成果レベルが近い
+        elif (input_achievement > 0.3 and es_achievement < 0.1) or \
+             (input_achievement < 0.1 and es_achievement > 0.3):
+            total_bonus -= 0.08  # 成果レベルが大きく異なる（ペナルティ）
+
+        # --------------------------------------------
+        # 3. 詳細度の一致度ボーナス（最大+0.08）
+        # --------------------------------------------
+        es_detail = calculate_detail_score(row['combined_answer'])
+        detail_diff = abs(input_detail - es_detail)
+
+        if detail_diff < 0.1:
+            total_bonus += 0.06  # 詳細度が非常に近い
+        elif detail_diff < 0.2:
+            total_bonus += 0.04  # 詳細度が近い
+        elif detail_diff < 0.3:
+            total_bonus += 0.02  # 詳細度がやや近い
+        elif detail_diff > 0.5:
+            total_bonus -= 0.04  # 詳細度が大きく異なる（ペナルティ）
+
+        # 両方とも詳細度が高い場合は追加ボーナス
+        if input_detail > 0.6 and es_detail > 0.6:
+            total_bonus += 0.02
+
+        # --------------------------------------------
+        # 4. エピソードタイプ一致ボーナス（最大+0.08）
+        # --------------------------------------------
+        es_episode_info = row.get('episode_type', {})
+        if isinstance(es_episode_info, dict):
+            es_episode_type = es_episode_info.get('type', 'その他の経験')
+            es_episode_category = EPISODE_TYPES.get(es_episode_type, {}).get('category', 'その他')
+
+            if input_episode_type == es_episode_type:
+                total_bonus += 0.08  # 完全一致
+            elif input_episode_category == es_episode_category and input_episode_category != 'その他':
+                total_bonus += 0.05  # 同じカテゴリ（ビジネス経験、課外活動など）
+            elif input_episode_type != 'その他の経験' and es_episode_type == 'その他の経験':
+                total_bonus -= 0.03  # 入力が具体的なのにESが曖昧（小さなペナルティ）
+
+        # --------------------------------------------
+        # 5. 強み・弱みの一致度ボーナス（最大+0.15）
+        # --------------------------------------------
+        es_sw = row.get('strengths_weaknesses', {})
+        if isinstance(es_sw, dict):
+            es_strengths = set(es_sw.get('strengths', []))
+            es_weaknesses = set(es_sw.get('weaknesses', []))
+
+            # 強みの一致度
+            strength_overlap = len(input_strengths & es_strengths)
+            if strength_overlap >= 2:
+                total_bonus += 0.10  # 2つ以上の強みが一致
+            elif strength_overlap == 1:
+                total_bonus += 0.05  # 1つの強みが一致
+
+            # 弱みの一致度
+            weakness_overlap = len(input_weaknesses & es_weaknesses)
+            if weakness_overlap >= 1:
+                total_bonus += 0.05  # 弱みが1つ以上一致
+
+            # 強みが完全に異なる場合は小さなペナルティ
+            if len(input_strengths) > 0 and len(es_strengths) > 0 and strength_overlap == 0:
+                total_bonus -= 0.03  # 強みが全く異なる場合は軽いペナルティ（-0.06 → -0.03に変更）
+
+        # --------------------------------------------
+        # 最終スコア計算（加算式）
+        # --------------------------------------------
+        final_score = base_score + total_bonus
+
+        # ✅ スコアを0.0〜1.0の範囲に制限（重要！）
+        final_score = max(0.0, min(1.0, final_score))
+
+        result.at[idx, 'similarity_score'] = final_score
+
+    # 最終的にtop_nに絞る
+    result = result.sort_values('similarity_score', ascending=False).head(top_n)
+
+    return result
+
+def calculate_individual_similarity(input_text, target_es_data):
+    """特定のESに対してのみ類似度を計算（志望企業のES用）
+
+    Args:
+        input_text: 入力テキスト
+        target_es_data: 計算対象のESデータ（DataFrame）
+
+    Returns:
+        類似度計算済みのDataFrame
+    """
+    if len(target_es_data) == 0:
+        return target_es_data
+
+    # 入力テキストにも同じ重み付けを適用
+    weighted_input = extract_theme_keywords_for_weighting(input_text)
+
+    # TF-IDF類似度（テキストから直接計算）
+    input_vector = vectorizer.transform([weighted_input])
+
+    # 対象ESのテキストをベクトル化
+    target_texts = []
+    for _, row in target_es_data.iterrows():
+        weighted_text = extract_theme_keywords_for_weighting(row['combined_answer'])
+        target_texts.append(weighted_text)
+
+    target_tfidf_matrix = vectorizer.transform(target_texts)
+    tfidf_similarities = cosine_similarity(input_vector, target_tfidf_matrix)[0]
+
+    # セマンティック類似度（BERT）
+    semantic_similarities = np.zeros(len(target_es_data))
+    has_semantic = False
+
+    try:
+        from sentence_transformers import SentenceTransformer
+
+        if sentence_model is not None and target_es_data['semantic_embedding'].iloc[0] is not None:
+            # 入力テキストのエンベディング生成
+            input_embedding = sentence_model.encode(str(input_text)[:512], convert_to_tensor=False)
+
+            # 対象ESとの類似度計算
+            embeddings_matrix = np.vstack(target_es_data['semantic_embedding'].values)
+            semantic_similarities = cosine_similarity([input_embedding], embeddings_matrix)[0]
+            has_semantic = True
+    except Exception as e:
+        print(f"⚠️ セマンティック類似度計算をスキップ: {e}")
+
+    # ハイブリッドスコア
+    if has_semantic:
+        combined_similarities = (
+            tfidf_similarities * 0.3 +
+            semantic_similarities * 0.7
+        )
+    else:
+        combined_similarities = tfidf_similarities
+
+    # 構造分析
+    input_structure = analyze_es_structure(input_text)
+
+    result = target_es_data.copy()
+    result['similarity_score'] = combined_similarities
+
+    # 構造類似度を計算
+    structure_scores = []
+    for idx, row in result.iterrows():
+        es_structure = analyze_es_structure(row['combined_answer'])
+        structure_similarity = sum(
+            min(input_structure[key], es_structure[key])
+            for key in input_structure.keys()
+        ) / max(sum(input_structure.values()), 1)
+        structure_scores.append(structure_similarity)
+
+    result['structure_score'] = structure_scores
+
+    # 最終スコア = 内容類似度 * 0.8 + 構造類似度 * 0.2
+    result['similarity_score'] = (
+        result['similarity_score'] * 0.8 +
+        result['structure_score'] * 0.2
+    )
+
+    # テーマフィルタリング強化
+    input_themes = categorize_es_themes(input_text)
+    input_theme_names = set([t['theme'] for t in input_themes[:3]])
+
+    # 入力ESの特徴を事前計算
+    input_achievement = extract_quantitative_achievement_score(input_text)
+    input_detail = calculate_detail_score(input_text)
+    input_episode_info = classify_episode_type(input_text)
+    input_episode_type = input_episode_info['type']
+    input_episode_category = EPISODE_TYPES.get(input_episode_type, {}).get('category', 'その他')
+
+    # 強み・弱みを事前計算
+    input_sw = extract_strengths_and_weaknesses(input_text)
+    input_strengths = set(input_sw['strengths'])
+    input_weaknesses = set(input_sw['weaknesses'])
+
+    # ボーナススコアの計算
+    for idx, row in result.iterrows():
+        base_score = row['similarity_score']
+        total_bonus = 0.0
+
+        # テーマ一致ボーナス
+        es_themes = row['themes']
+        es_theme_names = set([t['theme'] for t in es_themes[:3]])
+        theme_overlap = len(input_theme_names & es_theme_names)
+
+        if theme_overlap >= 3:
+            total_bonus += 0.08
+        elif theme_overlap == 2:
+            total_bonus += 0.05
+        elif theme_overlap == 1:
+            total_bonus += 0.03
+
+        # 定量的成果の一致度ボーナス
+        es_achievement = extract_quantitative_achievement_score(row['combined_answer'])
+
+        if input_achievement > 0.4 and es_achievement > 0.4:
+            total_bonus += 0.10
+        elif input_achievement > 0.2 and es_achievement > 0.2:
+            total_bonus += 0.06
+        elif abs(input_achievement - es_achievement) < 0.15:
+            total_bonus += 0.04
+        elif (input_achievement > 0.3 and es_achievement < 0.1) or \
+             (input_achievement < 0.1 and es_achievement > 0.3):
+            total_bonus -= 0.08
+
+        # 詳細度の一致度ボーナス
+        es_detail = calculate_detail_score(row['combined_answer'])
+        detail_diff = abs(input_detail - es_detail)
+
+        if detail_diff < 0.1:
+            total_bonus += 0.06
+        elif detail_diff < 0.2:
+            total_bonus += 0.04
+        elif detail_diff < 0.3:
+            total_bonus += 0.02
+        elif detail_diff > 0.5:
+            total_bonus -= 0.04
+
+        if input_detail > 0.6 and es_detail > 0.6:
+            total_bonus += 0.02
+
+        # エピソードタイプ一致ボーナス
+        es_episode_info = row.get('episode_type', {})
+        if isinstance(es_episode_info, dict):
+            es_episode_type = es_episode_info.get('type', 'その他の経験')
+            es_episode_category = EPISODE_TYPES.get(es_episode_type, {}).get('category', 'その他')
+
+            if input_episode_type == es_episode_type:
+                total_bonus += 0.08
+            elif input_episode_category == es_episode_category and input_episode_category != 'その他':
+                total_bonus += 0.05
+            elif input_episode_type != 'その他の経験' and es_episode_type == 'その他の経験':
+                total_bonus -= 0.03
+
+        # 強み・弱みの一致度ボーナス
+        es_sw = row.get('strengths_weaknesses', {})
+        if isinstance(es_sw, dict):
+            es_strengths = set(es_sw.get('strengths', []))
+            es_weaknesses = set(es_sw.get('weaknesses', []))
+
+            strength_overlap = len(input_strengths & es_strengths)
+            if strength_overlap >= 2:
+                total_bonus += 0.10
+            elif strength_overlap == 1:
+                total_bonus += 0.05
+
+            weakness_overlap = len(input_weaknesses & es_weaknesses)
+            if weakness_overlap >= 1:
+                total_bonus += 0.05
+
+            if len(input_strengths) > 0 and len(es_strengths) > 0 and strength_overlap == 0:
+                total_bonus -= 0.03
+
+        # 最終スコア計算
+        final_score = base_score + total_bonus
+        final_score = max(0.0, min(1.0, final_score))
+
+        result.at[idx, 'similarity_score'] = final_score
+
+    return result
+
+def extract_salary_numeric(salary_str):
+    """給与から数値を抽出"""
+    if pd.isna(salary_str):
+        return None
+    match = re.search(r'(\d+)万', str(salary_str))
+    if match:
+        return int(match.group(1)) * 10000
+    return None
+
+def estimate_company_difficulty(row):
+    """企業難易度を推定"""
+    difficulty = 0.5
+
+    avg_salary = extract_salary_numeric(row.get('avg_salary'))
+    if avg_salary:
+        if avg_salary >= 8000000:
+            difficulty += 0.3
+        elif avg_salary >= 6000000:
+            difficulty += 0.2
+        elif avg_salary >= 5000000:
+            difficulty += 0.1
+
+    employee_str = str(row.get('employee_count', ''))
+    if '1万人以上' in employee_str:
+        difficulty += 0.2
+
+    return min(difficulty, 1.0)
+
+def calculate_match_score(similarity_score, company_difficulty, industry_match, university_match=0.5):
+    """マッチスコア計算"""
+    score = (
+        similarity_score * 0.5 +
+        (1 - company_difficulty) * 0.2 +
+        industry_match * 0.2 +
+        university_match * 0.1
+    )
+    return min(int(score * 100), 100)
+
+def get_top_companies(similar_es, user_industry, user_university="", top_n=5):
+    """TOP企業を選出"""
+    companies = []
+    seen_companies = set()
+
+    # まず十分な数の企業を処理（top_nの3倍または最低20社）
+    process_count = max(top_n * 3, 20)
+
+    for _, row in similar_es.iterrows():
+        company_name = row['company_name']
+
+        if company_name in seen_companies:
+            continue
+        seen_companies.add(company_name)
+
+        difficulty = estimate_company_difficulty(row)
+        industry_match = 1.0 if user_industry in row['industry'] else 0.5
+        university_match = 1.0 if user_university and user_university == row.get('university') else 0.5
+
+        match_score = calculate_match_score(
+            row['similarity_score'],
+            difficulty,
+            industry_match,
+            university_match
+        )
+
+        reasons = []
+        if row['similarity_score'] > 0.3:
+            reasons.append('ESの内容が類似')
+        if industry_match == 1.0:
+            reasons.append('志望業界と一致')
+        if university_match == 1.0:
+            reasons.append('同じ大学からの採用実績')
+        if difficulty < 0.6:
+            reasons.append('比較的通過しやすい')
+
+        reason = '、'.join(reasons) if reasons else 'データマッチング'
+
+        salary = extract_salary_numeric(row['avg_salary'])
+        if salary and salary >= 7000000:
+            avg_gpa = "3.2-3.8"
+        elif salary and salary >= 6000000:
+            avg_gpa = "3.0-3.6"
+        else:
+            avg_gpa = "2.8-3.4"
+
+        companies.append({
+            'name': company_name,
+            'industry': row['industry'],
+            'matchScore': match_score,
+            'reason': reason,
+            'avgGpa': avg_gpa,
+            'avgSalary': row.get('avg_salary', '不明'),
+            'employeeCount': row.get('employee_count', '不明'),
+        })
+
+        # 十分な数の企業を処理したら終了
+        if len(companies) >= process_count:
+            break
+
+    # matchScoreで降順ソートしてtop_nを返す
+    companies.sort(key=lambda x: x['matchScore'], reverse=True)
+    return companies[:top_n]
+
+def calculate_target_company_match(company_name, similar_es, user_industry, user_university="", rank=1):
+    """特定の志望企業とのマッチ率を計算（志望順位に応じて調整）"""
+    # 企業データを検索
+    company_data = es_data[es_data['company_name'] == company_name]
+
+    if len(company_data) == 0:
+        # データがない場合は、類似ESの平均スコアを使用
+        if len(similar_es) > 0:
+            avg_score = similar_es['similarity_score'].mean()
+            base_score = min(int(avg_score * 70), 100)  # 控えめなスコア
+
+            # 志望順位による調整
+            rank_adjustment = 1.0 if rank == 1 else (0.95 if rank == 2 else 0.9)
+            adjusted_score = int(base_score * rank_adjustment)
+
+            return {
+                'name': company_name,
+                'industry': '不明',
+                'matchScore': adjusted_score,
+                'reason': 'データ不足のため推定値です',
+                'dataCount': 0
+            }
+        return None
+
+    # 企業の代表的なデータを取得
+    representative = company_data.iloc[0]
+
+    # 類似度を計算（その企業のESとの平均類似度）
+    company_similarities = similar_es[similar_es['company_name'] == company_name]
+
+    if len(company_similarities) > 0:
+        avg_similarity = company_similarities['similarity_score'].mean()
+    else:
+        avg_similarity = similar_es['similarity_score'].mean() * 0.7  # 控えめに推定
+
+    difficulty = estimate_company_difficulty(representative)
+    industry_match = 1.0 if user_industry in str(representative['industry']) else 0.5
+    university_match = 1.0 if user_university and user_university == representative.get('university') else 0.5
+
+    base_match_score = calculate_match_score(
+        avg_similarity,
+        difficulty,
+        industry_match,
+        university_match
+    )
+
+    # 志望順位による調整（第一志望=100%、第二志望=95%、第三志望=90%）
+    rank_adjustment = 1.0 if rank == 1 else (0.95 if rank == 2 else 0.9)
+    match_score = int(base_match_score * rank_adjustment)
+
+    reasons = []
+    if avg_similarity > 0.3:
+        reasons.append('ESの内容が類似')
+    if industry_match == 1.0:
+        reasons.append('志望業界と一致')
+    if university_match == 1.0:
+        reasons.append('同じ大学からの採用実績')
+    if len(company_data) >= 10:
+        reasons.append(f'{len(company_data)}件の合格ES実績あり')
+    elif len(company_data) >= 5:
+        reasons.append(f'{len(company_data)}件のES実績あり')
+
+    reason = '、'.join(reasons) if reasons else 'データマッチング'
+
+    return {
+        'name': company_name,
+        'industry': str(representative['industry']) if not pd.isna(representative['industry']) else '不明',
+        'matchScore': match_score,
+        'reason': reason,
+        'dataCount': len(company_data)
+    }
+
+def analyze_industry(industry):
+    """業界分析"""
+    industry_data = es_data[es_data['industry'].str.contains(industry, na=False)]
+
+    if len(industry_data) == 0:
+        return {
+            'passRate': 70,
+            'avgApplicants': 150,
+            'competition': '中',
+            'recommendations': ['業界研究を深める', '企業の特徴を理解する']
+        }
+
+    pass_rate = 75
+    avg_applicants = len(industry_data) * 3
+
+    if avg_applicants > 200:
+        competition = '非常に高'
+    elif avg_applicants > 150:
+        competition = '高'
+    elif avg_applicants > 100:
+        competition = '中'
+    else:
+        competition = '低'
+
+    recommendations_map = {
+        'IT': ['技術スキルの証明', 'ポートフォリオの作成', '最新技術のキャッチアップ'],
+        'コンサルティング': ['ケース面接対策', '論理的思考力の強化', 'フェルミ推定の練習'],
+        '金融': ['金融知識の習得', '数字に強いエピソード', '誠実さのアピール'],
+        'メーカー': ['技術力の証明', '長期的なキャリアビジョン', 'ものづくりへの情熱']
+    }
+
+    recommendations = recommendations_map.get(
+        industry,
+        ['業界研究を深める', '企業の特徴を理解する', '自己分析を徹底する']
+    )
+
+    return {
+        'passRate': pass_rate,
+        'avgApplicants': avg_applicants,
+        'competition': competition,
+        'recommendations': recommendations
+    }
+
+def analyze_gakuchika(gakuchika_text):
+    """ガクチカ分析"""
+    strengths = []
+    improvements = []
+
+    if any(word in gakuchika_text for word in ['数値', '結果', '成果', '%', '人']):
+        strengths.append('具体的な数値・成果の記載')
+
+    if any(word in gakuchika_text for word in ['課題', '問題', '解決', '改善']):
+        strengths.append('課題解決のプロセスが明確')
+
+    if len(gakuchika_text) >= 300:
+        strengths.append('十分な分量で説明されている')
+
+    if not any(word in gakuchika_text for word in ['チーム', '協力', '連携', 'メンバー']):
+        improvements.append('チームワークの要素を追加')
+
+    if not any(word in gakuchika_text for word in ['学んだ', '得た', '成長']):
+        improvements.append('学びや成長の要素を強調')
+
+    if len(gakuchika_text) < 200:
+        improvements.append('もう少し詳しく記述する')
+
+    return {
+        'strengths': strengths if strengths else ['基本的な構成は良好'],
+        'improvements': improvements if improvements else ['現状で良い内容です']
+    }
+
+def analyze_es_answers(answers):
+    """ES分析（複数回答対応）"""
+    all_text = ' '.join([a for a in answers if a])
+
+    strengths = []
+    improvements = []
+
+    if any(word in all_text for word in ['数値', '結果', '成果', '%', '人', '件', '倍']):
+        strengths.append('具体的な数値・成果の記載')
+    if any(word in all_text for word in ['課題', '問題', '解決', '改善', '克服']):
+        strengths.append('課題解決のプロセスが明確')
+    if any(word in all_text for word in ['チーム', '協力', '連携', 'メンバー', '組織']):
+        strengths.append('チームワークの要素がある')
+    if len(all_text) >= 500:
+        strengths.append('十分な分量で説明されている')
+
+    if not any(word in all_text for word in ['学んだ', '得た', '成長', '経験']):
+        improvements.append('学びや成長の要素を強調')
+    if not any(word in all_text for word in ['具体的', '例えば', '実際に']):
+        improvements.append('より具体的なエピソードを追加')
+    if len(all_text) < 300:
+        improvements.append('もう少し詳しく記述する')
+
+    return {
+        'strengths': strengths if strengths else ['基本的な構成は良好'],
+        'improvements': improvements if improvements else ['現状で良い内容です']
+    }
+
+def get_industry_similar_es_samples(similar_es, target_industry, top_n=3):
+    """志望業界内の類似度の高いESのサンプルを取得
+
+    まず小分類（完全一致）で検索し、見つからない場合は大分類で検索する
+    """
+    # 1. まず小分類（完全一致）で検索
+    industry_es = similar_es[similar_es['industry'].str.contains(target_industry, na=False)]
+    exact_match = True
+    matched_category = target_industry
+
+    # 2. 小分類で見つからない場合、大分類で検索
+    if len(industry_es) == 0:
+        major_category = extract_major_industry_category(target_industry)
+        if major_category:
+            # 大分類で始まる業界をすべて検索
+            industry_es = similar_es[similar_es['industry'].str.startswith(major_category, na=False)]
+            exact_match = False
+            matched_category = major_category
+
+        # それでも見つからない場合は空のリストを返す
+        if len(industry_es) == 0:
+            return {'samples': [], 'exactMatch': False, 'matchedCategory': None}
+
+    samples = []
+
+    for idx, row in industry_es.head(top_n).iterrows():
+        user_info = str(row.get('user_info', ''))
+
+        # 卒業年度を抽出
+        grad_year_match = re.search(r'(\d{2})卒', user_info)
+        grad_year = grad_year_match.group(1) + '卒' if grad_year_match else '不明'
+
+        university = row.get('university', '不明')
+
+        # 学部・学科を抽出
+        major_match = re.search(r'\|\s*([^|]+)\s*\|', user_info)
+        major = major_match.group(1).strip() if major_match else '不明'
+
+        es_content = []
+        for i in range(1, 4):
+            question = row.get(f'question_{i}', '')
+            answer = row.get(f'answer_{i}', '')
+
+            if question and answer and str(question).strip() and str(answer).strip():
+                es_content.append({
+                    'question': str(question).strip(),
+                    'answer': str(answer).strip()[:500] + ('...' if len(str(answer)) > 500 else '')
+                })
+
+        if len(es_content) > 0:
+            # 類似度スコアが存在する場合のみ計算、なければNone
+            similarity_value = None
+            if pd.notna(row['similarity_score']) and row['similarity_score'] is not None:
+                similarity_value = round(float(row['similarity_score']) * 100, 1)
+
+            sample = {
+                'company': str(row['company_name']),
+                'industry': str(row['industry']) if not pd.isna(row['industry']) else '不明',
+                'result': str(row['result_status']),
+                'similarity': similarity_value,  # None または数値
+                'profile': {
+                    'university': university,
+                    'major': major,
+                    'gradYear': grad_year
+                },
+                'esContent': es_content
+            }
+            samples.append(sample)
+
+    return {
+        'samples': samples,
+        'exactMatch': exact_match,
+        'matchedCategory': matched_category
+    }
+
+def get_similar_es_samples(similar_es, top_n=3):
+    """類似ESのサンプルを取得"""
+    samples = []
+
+    for idx, row in similar_es.head(top_n).iterrows():
+        user_info = str(row.get('user_info', ''))
+
+        # 卒業年度を抽出
+        grad_year_match = re.search(r'(\d{2})卒', user_info)
+        grad_year = grad_year_match.group(1) + '卒' if grad_year_match else '不明'
+
+        university = row.get('university', '不明')
+
+        # 学部・学科を抽出
+        major_match = re.search(r'\|\s*([^|]+)\s*\|', user_info)
+        major = major_match.group(1).strip() if major_match else '不明'
+
+        es_content = []
+        for i in range(1, 4):
+            question = row.get(f'question_{i}', '')
+            answer = row.get(f'answer_{i}', '')
+
+            if question and answer and str(question).strip() and str(answer).strip():
+                es_content.append({
+                    'question': str(question).strip(),
+                    'answer': str(answer).strip()[:500] + ('...' if len(str(answer)) > 500 else '')
+                })
+
+        if len(es_content) > 0:
+            # 類似度スコアが存在する場合のみ計算、なければNone
+            similarity_value = None
+            if pd.notna(row['similarity_score']) and row['similarity_score'] is not None:
+                similarity_value = round(float(row['similarity_score']) * 100, 1)
+
+            sample = {
+                'company': str(row['company_name']),
+                'industry': str(row['industry']) if not pd.isna(row['industry']) else '不明',
+                'result': str(row['result_status']),
+                'similarity': similarity_value,  # None または数値
+                # 🆕 データソースを追加
+                'dataSource': str(row.get('data_source', '不明')),
+                'profile': {
+                    'university': university,
+                    'major': major,
+                    'gradYear': grad_year
+                },
+                'esContent': es_content
+            }
+            samples.append(sample)
+
+    return samples
+
+def get_es_samples_by_company(similar_es, company_name, top_n=3):
+    """
+    指定した企業の類似ESサンプルを取得
+
+    Args:
+        similar_es: 類似度計算済みのES DataFrame
+        company_name: 企業名
+        top_n: 返すサンプル数
+
+    Returns:
+        list: ESサンプルのリスト
+    """
+    # まず、類似度計算済みのESから取得を試みる
+    company_es = similar_es[similar_es['company_name'] == company_name]
+
+    # 類似度計算済みにない場合は、es_data全体から取得
+    if len(company_es) == 0:
+        print(f"  ℹ️ {company_name} のESをes_dataから取得します")
+        company_es = es_data[es_data['company_name'] == company_name].copy()
+
+        # similarity_scoreがない場合は、Noneを設定（類似度未計算を明示）
+        if 'similarity_score' not in company_es.columns:
+            company_es['similarity_score'] = None  # 類似度未計算
+
+        # 最新のものから取得（result_statusで内定を優先）
+        # similarity_scoreがNoneの場合は0として扱う
+        company_es['_sort_similarity'] = company_es['similarity_score'].fillna(0)
+        company_es = company_es.sort_values(
+            by=['result_status', '_sort_similarity'],
+            ascending=[False, False]
+        )
+
+    if len(company_es) == 0:
+        return []
+
+    samples = []
+
+    for idx, row in company_es.head(top_n).iterrows():
+        user_info = str(row.get('user_info', ''))
+
+        # 卒業年度を抽出
+        grad_year_match = re.search(r'(\d{2})卒', user_info)
+        grad_year = grad_year_match.group(1) + '卒' if grad_year_match else '不明'
+
+        university = row.get('university', '不明')
+
+        # 学部・学科を抽出
+        major_match = re.search(r'\|\s*([^|]+)\s*\|', user_info)
+        major = major_match.group(1).strip() if major_match else '不明'
+
+        es_content = []
+        for i in range(1, 4):
+            question = row.get(f'question_{i}', '')
+            answer = row.get(f'answer_{i}', '')
+
+            if question and answer and str(question).strip() and str(answer).strip():
+                es_content.append({
+                    'question': str(question).strip(),
+                    'answer': str(answer).strip()[:500] + ('...' if len(str(answer)) > 500 else '')
+                })
+
+        if len(es_content) > 0:
+            # 類似度スコアが存在する場合のみ計算、なければNone
+            similarity_value = None
+            if pd.notna(row['similarity_score']) and row['similarity_score'] is not None:
+                similarity_value = round(float(row['similarity_score']) * 100, 1)
+
+            sample = {
+                'company': str(row['company_name']),
+                'industry': str(row['industry']) if not pd.isna(row['industry']) else '不明',
+                'result': str(row['result_status']),
+                'similarity': similarity_value,  # None または数値
+                # 🆕 データソースを追加
+                'dataSource': str(row.get('data_source', '不明')),
+                'profile': {
+                    'university': university,
+                    'major': major,
+                    'gradYear': grad_year
+                },
+                'esContent': es_content
+            }
+            samples.append(sample)
+
+    return samples
+
+def get_similar_es_samples_from_top_companies(similar_es, top_companies):
+    """
+    TOP企業リストに基づいて類似ESのサンプルを取得（順序を維持）
+    ※この関数は後方互換性のために残していますが、非推奨です
+
+    Args:
+        similar_es: 類似度計算済みのES DataFrame
+        top_companies: get_top_companies()から返された企業リスト
+
+    Returns:
+        list: TOP企業と同じ順序・同じ企業のESサンプル
+    """
+    samples = []
+
+    for company_info in top_companies:
+        company_name = company_info['name']
+        company_samples = get_es_samples_by_company(similar_es, company_name, top_n=1)
+
+        if len(company_samples) > 0:
+            # matchScoreを追加
+            company_samples[0]['matchScore'] = company_info['matchScore']
+            samples.append(company_samples[0])
+
+    return samples
+
+
+def get_episode_type_similar_es_samples(similar_es, input_text, top_n=3):
+    """
+    同じエピソードタイプの類似ESのサンプルを取得
+
+    Args:
+        similar_es: 類似度計算済みのES DataFrame
+        input_text: ユーザー入力のES本文
+        top_n: 返すサンプル数
+
+    Returns:
+        dict: {
+            'episodeType': エピソードタイプ名,
+            'episodeTypeJa': エピソードタイプの日本語名,
+            'confidence': 信頼度,
+            'samples': [類似ESのリスト],
+            'totalCount': 同じエピソードタイプのES総数
+        }
+    """
+    # 入力ESのエピソードタイプを判定
+    input_episode_info = classify_episode_type(input_text)
+    input_episode_type = input_episode_info['type']
+    input_confidence = input_episode_info['confidence']
+
+    print(f"  🎯 入力ESのエピソードタイプ: {input_episode_type} (信頼度: {input_confidence})")
+
+    # 同じエピソードタイプのESをフィルタリング
+    same_episode_es = similar_es[
+        similar_es['episode_type'].apply(lambda x: x['type'] == input_episode_type)
+    ]
+
+    # 件数が少ない場合は、マルチラベルでも検索
+    if len(same_episode_es) < top_n:
+        print(f"  ⚠️ 同一エピソードタイプのESが{len(same_episode_es)}件のみ。マルチラベルで追加検索...")
+
+        # マルチラベルで同じエピソードタイプを含むESを追加
+        multi_episode_es = similar_es[
+            similar_es['episode_types_multi'].apply(
+                lambda types: any(t['type'] == input_episode_type for t in types)
+            )
+        ]
+
+        # 重複を除外して結合
+        same_episode_es = pd.concat([same_episode_es, multi_episode_es]).drop_duplicates()
+
+    total_count = len(same_episode_es)
+
+    if total_count == 0:
+        return {
+            'episodeType': input_episode_type,
+            'episodeTypeJa': input_episode_type,
+            'confidence': input_confidence,
+            'samples': [],
+            'totalCount': 0,
+            'message': f'「{input_episode_type}」カテゴリのESが見つかりませんでした'
+        }
+
+    # 上位top_nのサンプルを取得
+    samples = []
+
+    for idx, row in same_episode_es.head(top_n).iterrows():
+        user_info = str(row.get('user_info', ''))
+
+        # 卒業年度を抽出
+        grad_year_match = re.search(r'(\d{2})卒', user_info)
+        grad_year = grad_year_match.group(1) + '卒' if grad_year_match else '不明'
+
+        university = row.get('university', '不明')
+
+        # 学部・学科を抽出
+        major_match = re.search(r'\|\s*([^|]+)\s*\|', user_info)
+        major = major_match.group(1).strip() if major_match else '不明'
+
+        es_content = []
+        for i in range(1, 4):
+            question = row.get(f'question_{i}', '')
+            answer = row.get(f'answer_{i}', '')
+
+            if question and answer and str(question).strip() and str(answer).strip():
+                es_content.append({
+                    'question': str(question).strip(),
+                    'answer': str(answer).strip()[:500] + ('...' if len(str(answer)) > 500 else '')
+                })
+
+        if len(es_content) > 0:
+            # エピソード情報を取得
+            episode_info = row['episode_type']
+
+            sample = {
+                'company': str(row['company_name']),
+                'industry': str(row['industry']) if not pd.isna(row['industry']) else '不明',
+                'result': str(row['result_status']),
+                'similarity': round(float(row['similarity_score']) * 100, 1),
+                'episodeType': episode_info['type'],
+                'episodeConfidence': episode_info['confidence'],
+                # 🆕 データソースを追加
+                'dataSource': str(row.get('data_source', '不明')),
+                'profile': {
+                    'university': university,
+                    'major': major,
+                    'gradYear': grad_year
+                },
+                'esContent': es_content
+            }
+            samples.append(sample)
+
+    return {
+        'episodeType': input_episode_type,
+        'episodeTypeJa': input_episode_type,  # 日本語名（既に日本語）
+        'confidence': input_confidence,
+        'samples': samples,
+        'totalCount': total_count,
+        'message': f'同じ「{input_episode_type}」カテゴリから{len(samples)}件のESを抽出しました'
+    }
+
+# ============================================
+# HTMLテンプレート（美しいUI）
+# ============================================
+
+# HTMLテンプレートは templates/index.html から読み込み
+
+# ============================================
+# FastAPIルート
+# ============================================
+
+@app.get("/", response_class=HTMLResponse)
+async def home():
+    """フロントエンドUI - データを埋め込んだHTMLを返す"""
+    print("\n🌐 ページ生成中...")
+
+    # 企業と業界のマッピングを作成
+    company_industries = {}
+    for company in companies_list[:300]:
+        company_data = es_data[es_data['company_name'] == company]
+        if len(company_data) > 0:
+            # 最も多い業界を取得
+            industry = company_data['industry'].mode()[0] if len(company_data['industry'].mode()) > 0 else '不明'
+            company_industries[company] = industry
+
+    # 選択肢データを準備
+    embedded_data = {
+        'universities': universities_list[:200],  # 最初の200校
+        'industries': industries_list,
+        'companies': companies_list[:300],  # 最初の300社
+        'commonQuestions': common_questions,
+        'companyCounts': {k: v for k, v in company_counts.items() if k in companies_list[:300]},
+        'industryCounts': industry_counts,
+        'companyIndustries': company_industries  # 企業と業界のマッピング
+    }
+
+    # JSONシリアライズ（ensure_ascii=Trueで安全に）
+    embedded_data_json = json.dumps(embedded_data, ensure_ascii=True)
+
+    # HTMLテンプレートを読み込み
+    template_path = os.path.join(template_dir, 'index.html')
+    with open(template_path, 'r', encoding='utf-8') as f:
+        html_content = f.read()
+
+    # <script type="application/json">で埋め込み
+    embedded_script = f"""
+    <script id="embedded-data" type="application/json">
+{embedded_data_json}
+    </script>
+    """
+
+    # HTMLの</head>直前に挿入
+    html_content = html_content.replace('</head>', embedded_script + '\n</head>')
+
+    print(f"  ✅ データ埋め込み完了: 大学{len(embedded_data['universities'])}校, 業界{len(embedded_data['industries'])}種類")
+
+    return HTMLResponse(content=html_content)
+
+@app.post("/analyze")
+async def analyze_es(data: AnalyzeRequest):
+    """ES診断API - 複数ES質問対応"""
+    try:
+        # 複数のES回答に対応
+        if not data.esAnswers or len(data.esAnswers) == 0:
+            raise HTTPException(status_code=400, detail='ES回答を入力してください')
+
+        has_long_answer = any(len(ans) >= 100 for ans in data.esAnswers)
+        if not has_long_answer:
+            raise HTTPException(status_code=400, detail='少なくとも1つの回答は100文字以上入力してください')
+
+        if not data.targetIndustry:
+            raise HTTPException(status_code=400, detail='志望業界を選択してください')
+
+        # 全ての回答を結合して類似度計算
+        combined_answers = ' '.join(data.esAnswers)
+        similar_es = calculate_similarity(combined_answers, top_n=100)
+
+        # 志望企業が指定されている場合、100位以内に含まれていない志望企業のESも追加で計算
+        if data.targetCompanies and len(data.targetCompanies) > 0:
+            additional_es_list = []
+            for target_company in data.targetCompanies:
+                if target_company and target_company.strip():
+                    # 志望企業の全ESを取得
+                    company_es_all = es_data[es_data['company_name'] == target_company]
+
+                    if len(company_es_all) > 0:
+                        # similar_esに含まれていないESを抽出
+                        company_es_not_in_top = company_es_all[~company_es_all.index.isin(similar_es.index)]
+
+                        if len(company_es_not_in_top) > 0:
+                            print(f"  📌 志望企業「{target_company}」のESを追加計算: {len(company_es_not_in_top)}件")
+                            # 追加で類似度を計算
+                            additional_similar = calculate_individual_similarity(combined_answers, company_es_not_in_top)
+                            additional_es_list.append(additional_similar)
+
+            # 追加ESをマージ
+            if len(additional_es_list) > 0:
+                similar_es = pd.concat([similar_es] + additional_es_list)
+                # 類似度でソート
+                similar_es = similar_es.sort_values('similarity_score', ascending=False)
+                # 重複を除去（念のため）
+                similar_es = similar_es[~similar_es.index.duplicated(keep='first')]
+                print(f"  ✅ 志望企業ESを追加後の総数: {len(similar_es)}件")
+
+        # 内定のみに絞るフィルター
+        if data.onlyAccepted:
+            similar_es = similar_es[similar_es['result'].isin(['内定', '内々定', '最終面接通過'])]
+
+        top_companies = get_top_companies(
+            similar_es,
+            data.targetIndustry,
+            data.university,
+            top_n=5
+        )
+
+        # 各TOP企業にESサンプルを追加（アコーディオン用）
+        for company in top_companies:
+            company['esSamples'] = get_es_samples_by_company(
+                similar_es,
+                company['name'],
+                top_n=3  # 各企業から3件のESを取得
+            )
+
+        industry_analysis = analyze_industry(data.targetIndustry)
+        es_analysis = analyze_es_answers(data.esAnswers)
+        industry_similar_es_samples = get_industry_similar_es_samples(similar_es, data.targetIndustry, top_n=3)
+
+        # 入力ESのエピソードタイプを判定
+        input_episode_info = classify_episode_type(combined_answers)
+        input_episode_types_multi = classify_multiple_episode_types(combined_answers, top_n=2)
+
+        # エピソードタイプ別の類似ES
+        episode_type_similar_es_samples = get_episode_type_similar_es_samples(
+            similar_es,
+            combined_answers,
+            top_n=3
+        )
+
+        # 志望企業のマッチ率を計算（第三志望まで）
+        target_companies_match = []
+        if data.targetCompanies and len(data.targetCompanies) > 0:
+            for i, target_company in enumerate(data.targetCompanies, 1):
+                if target_company and target_company.strip():
+                    match_result = calculate_target_company_match(
+                        target_company,
+                        similar_es,
+                        data.targetIndustry,
+                        data.university,
+                        rank=i  # 志望順位を渡す
+                    )
+                    if match_result:
+                        # 志望順位を追加
+                        match_result['rank'] = i
+                        # ESサンプルを追加（アコーディオン用）
+                        match_result['esSamples'] = get_es_samples_by_company(
+                            similar_es,
+                            target_company,
+                            top_n=3  # 各企業から3件のESを取得
+                        )
+                        target_companies_match.append(match_result)
+
+        # 統計情報を計算
+        total_es_count = len(es_data)
+        matched_es_count = len(similar_es)
+        industry_es_count = len(es_data[es_data['industry'].str.contains(data.targetIndustry, na=False)])
+
+        # 志望企業のデータ数をカウント
+        target_companies_data_count = {}
+        if data.targetCompanies and len(data.targetCompanies) > 0:
+            for target_company in data.targetCompanies:
+                if target_company and target_company.strip():
+                    count = len(es_data[es_data['company_name'] == target_company])
+                    target_companies_data_count[target_company] = count
+
+        # 第三志望までのマッチ率の平均を計算
+        avg_match_rate = 0
+        if len(target_companies_match) > 0:
+            avg_match_rate = sum(item['matchScore'] for item in target_companies_match) / len(target_companies_match)
+
+        response = {
+            'matchCompanies': top_companies,  # 各企業にesSamplesフィールド追加済み（アコーディオン用）
+            'industryAnalysis': industry_analysis,
+            'esAnalysis': es_analysis,
+            'industrySimilarESSamples': industry_similar_es_samples,  # 業界内の類似ES
+            'episodeTypeSimilarESSamples': episode_type_similar_es_samples,  # エピソードタイプ別の類似ES
+            'targetCompaniesMatch': target_companies_match,  # 各企業にesSamplesフィールド追加済み（アコーディオン用）
+            'dataStatistics': {
+                'totalEsCount': total_es_count,
+                'matchedEsCount': matched_es_count,
+                'industryEsCount': industry_es_count,
+                'targetCompaniesDataCount': target_companies_data_count,
+                'avgMatchRate': round(avg_match_rate, 1)
+            },
+            'userInfo': {
+                'university': data.university,
+                'major': data.major,
+                'graduationYear': data.graduationYear
+            },
+            'episodeTypeInfo': {  # エピソードタイプ情報
+                'primary': input_episode_info,
+                'all': input_episode_types_multi
+            }
+        }
+
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ エラー発生: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/analyze_similarity")
+async def analyze_similarity(data: SimilarityAnalysisRequest):
+    """OpenAI APIを使って類似点と改善点を分析"""
+    try:
+        # 環境変数からAPI keyを取得
+        api_key = os.getenv('OPENAI_API_KEY')
+
+        if not api_key:
+            raise HTTPException(status_code=500, detail='OpenAI API keyが設定されていません。.envファイルにOPENAI_API_KEYを設定してください。')
+
+        client = OpenAI(api_key=api_key)
+
+        prompt = f"""
+以下の2つのエントリーシート（ES）を比較して、類似点と改善点を分析してください。
+
+【あなたのES】
+{data.userES}
+
+【合格した類似ES】
+{data.similarES}
+
+以下の形式で回答してください：
+
+## 類似している点
+- 具体的な類似点を3〜5つ箇条書きで記載
+- なぜその点が評価されるのかも説明
+
+## あなたのESの改善点
+- 具体的な改善提案を3〜5つ箇条書きで記載
+- どのように改善すればより良くなるかも説明
+"""
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "あなたは就職活動の専門家です。エントリーシートの分析に精通しており、建設的なフィードバックを提供します。"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=1500
+        )
+
+        analysis = response.choices[0].message.content
+
+        return {
+            "analysis": analysis,
+            "success": True
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ OpenAI API エラー: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"分析中にエラーが発生しました: {str(e)}")
+
+# ============================================
+# 起動時のイベントハンドラ
+# ============================================
+
+@app.on_event("startup")
+async def startup_event():
+    """アプリケーション起動時にデータを読み込む"""
+    print("\n" + "="*60)
+    print("🚀 ES診断ツール（FastAPI版）起動中...")
+    print("="*60)
+
+    # 前処理済みデータの読み込みを試みる（新しいファイル名を指定）
+    preprocessed_loaded = load_preprocessed_data(csv_basename='unified_es_data_20251109')
+
+    if not preprocessed_loaded:
+        # 前処理済みデータがない場合、CSVから読み込む
+        csv_path = os.path.join(base_dir, '..', 'data', 'unified_es_data_20251109.csv')
+
+        if os.path.exists(csv_path):
+            print(f"\n📂 CSVファイルからデータを読み込みます: {csv_path}")
+            load_csv_data(csv_path)
+        else:
+            print(f"\n❌ CSVファイルが見つかりません: {csv_path}")
+            print("⚠️ データが読み込まれていない状態で起動します")
+            print("💡 /analyzeエンドポイントは使用できません")
+    
+    print("\n" + "="*60)
+    print("✅ 起動完了！")
+    print("="*60)
+    print(f"📊 データ統計:")
+    if es_data is not None:
+        print(f"  - ES件数: {len(es_data)}件")
+        print(f"  - 企業数: {len(companies_list)}社")
+        print(f"  - 業界数: {len(industries_list)}種類")
+        print(f"  - 大学数: {len(universities_list)}校")
+    else:
+        print("  - データなし")
+    print("="*60)
+
+# ============================================
+# メイン実行
+# ============================================
+
+if __name__ == "__main__":
+    import uvicorn
+    
+    # 起動設定
+    config = {
+        "app": "app:app",
+        "host": "0.0.0.0",
+        "port": 8000,
+        "reload": True,  # 開発時のみTrue
+        "log_level": "info"
+    }
+    
+    print("\n🔧 サーバー起動設定:")
+    print(f"  - Host: {config['host']}")
+    print(f"  - Port: {config['port']}")
+    print(f"  - Reload: {config['reload']}")
+    print(f"\n🌐 アクセスURL: http://localhost:{config['port']}")
+    print(f"📚 APIドキュメント: http://localhost:{config['port']}/docs")
+    print(f"📘 ReDoc: http://localhost:{config['port']}/redoc")
+    print("")
+    
+    uvicorn.run(**config)
